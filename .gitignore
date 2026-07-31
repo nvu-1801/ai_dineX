@@ -1,0 +1,58 @@
+# ==========================================
+# 1. PYTHON / FASTAPI (AI Service)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.pytest_cache/
+*.sqlite3
+
+# BẢO MẬT: Tuyệt đối không push file môi trường
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# 2. .NET 10 / VISUAL STUDIO 2026 (Main BE / API Gateway)
+# ==========================================
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.dbmdl
+*.jfm
+TestResults/
+# Bỏ qua cấu hình môi trường Dev cục bộ
+appsettings.Development.json
+appsettings.Local.json
+
+# ==========================================
+# 3. FLUTTER (Frontend Mobile/Web)
+# ==========================================
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/android/.gradle/
+/ios/Pods/
+/ios/.symlinks/
+/ios/Flutter/Flutter.framework/
+/ios/Flutter/Flutter.podspec
+*.keystore
+
+# ==========================================
+# 4. OS, IDE & LOGS CHUNG
+# ==========================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+docker-compose.override.yml
