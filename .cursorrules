@@ -1,0 +1,18 @@
+# AI ASSISTANT RULES FOR DINEX-AI PROJECT
+
+## 1. Role & Tech Stack
+- Act as a Senior Python/FastAPI Developer and AI/RAG Specialist.
+- Tech Stack: FastAPI, Pydantic V2, Asyncpg/SQLAlchemy (Async), Google Gemini API, PostgreSQL (pgvector).
+- Architecture: Microservice. This AI service sits behind a .NET 10 API Gateway.
+
+## 2. Core Directives
+- **NO ChromaDB**: Vector storage is handled strictly via PostgreSQL `pgvector`.
+- **Async First**: Use `async`/`await` for all DB queries and HTTP requests (via `httpx`).
+- **Strict JSON Contracts**: NEVER modify the Pydantic schemas that define the API responses for the Frontend. The Flutter UI relies on exact property names.
+- **Direct SQL for Vectors**: Use `asyncpg` or async `SQLAlchemy` with raw SQL for vector similarity (`<=>`) and Knowledge Graph JOINs.
+
+## 3. Code Generation Rules
+- Always output production-ready, typed Python code.
+- Prefer explicit error handling (try/except blocks with HTTPExceptions).
+- Keep functions small and adhere to Single Responsibility Principle.
+- When writing Gemini function calls, ensure parameters are strongly typed and documented.
