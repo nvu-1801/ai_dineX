@@ -7,6 +7,7 @@ Provides:
 from __future__ import annotations
 
 import logging
+import asyncio
 from uuid import UUID
 
 import google.generativeai as genai
@@ -32,9 +33,11 @@ async def _embed_query(query: str) -> str:
     """
     Generate a Gemini embedding for a single query string and return it
     as a pgvector-compatible literal string: '[0.1,0.2,...]'.
+    Sử dụng asyncio.to_thread để ngăn chặn Blocking Event Loop của FastAPI.
     """
     try:
-        response = genai.embed_content(
+        response = await asyncio.to_thread(
+            genai.embed_content,
             model=_EMBED_MODEL,
             content=query,
             task_type="retrieval_query",
@@ -42,7 +45,7 @@ async def _embed_query(query: str) -> str:
         vector: list[float] = response["embedding"]
         return "[" + ",".join(map(str, vector)) + "]"
     except Exception as exc:
-        logger.error("Gemini embedding error: %s", exc)
+        logger.error("[RAG Service] Lỗi khi tạo embedding: %s", exc)
         raise HTTPException(status_code=502, detail=f"Embedding generation failed: {exc}") from exc
 
 

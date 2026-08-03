@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, AliasChoices
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -28,9 +28,15 @@ router = APIRouter(prefix="/api/ai", tags=["AI"])
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
-    message: str
-    branch_id: Optional[str] = None
-    chat_history: list[dict] = []
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Nội dung tin nhắn từ người dùng, giới hạn 2000 ký tự để chống DoS/Buffer Overflow."
+    )
+    session_id: Optional[str] = Field(None, validation_alias=AliasChoices("session_id", "sessionId"))
+    branch_id: Optional[str] = Field(None, validation_alias=AliasChoices("branch_id", "branchId"))
+    chat_history: list[dict] = Field([], validation_alias=AliasChoices("chat_history", "chatHistory"))
 
 
 class IngestResponse(BaseModel):
