@@ -45,11 +45,22 @@ genai.configure(api_key=api_key)
 _cached_categories: dict[str, str] = {}
 _last_sync_time = 0.0
 
+_CATEGORY_KEYWORDS_TEMPLATES = {
+    "Đồ uống": "Đồ uống (nước ép, sinh tố, nước ngọt, nước suối, giải khát, đồ mát, nước thanh nhiệt)",
+    "Trà": "Trà (trà đào, trà sữa, trà trái cây, hồng trà, lục trà, uống thanh nhẹ)",
+    "Cà Phê": "Cà Phê (đen đá, sữa đá, bạc sỉu, cafe, phin, espresso, tỉnh táo, chống buồn ngủ)",
+    "Cơm": "Cơm (cơm tấm, cơm chiên, dĩa cơm, chắc bụng, ăn no, bữa trưa, bữa tối)",
+    "Phở": "Phở (phở bò, phở gà, phở nước, đồ nước nóng, dễ tiêu)",
+    "Bún": "Bún (bún chả, bún bò, bún thịt nướng, món bún, bún trộn)",
+    "Tráng miệng": "Tráng miệng (chè, bánh flan, kem, đồ ngọt, tráng miệng sau bữa ăn, mát lạnh)",
+    "Ăn Vặt": "Ăn Vặt (nhâm nhi, ăn nhẹ, cá viên, xúc xích, đồ chiên, lai rai, ăn chơi)",
+    "Món Khai Vị": "Món Khai Vị (chả giò, gỏi cuốn, kích thích vị giác, khai vị)"
+}
+
 async def _get_or_sync_categories() -> dict[str, str]:
     global _cached_categories, _last_sync_time
     now = time.time()
     
-    # Sync if empty or cache is older than 5 minutes (300s)
     if not _cached_categories or (now - _last_sync_time) > 300:
         url = f"{settings.MAIN_BACKEND_URL.rstrip('/')}/api/categories"
         try:
@@ -60,21 +71,27 @@ async def _get_or_sync_categories() -> dict[str, str]:
                     new_mapping = {}
                     for cat in data:
                         menu_item_count = cat.get("menuItemCount", 0)
-                        # Filter out category with no items
                         if menu_item_count > 0:
                             name = cat.get("name", "")
                             cat_id = cat.get("id", "")
                             desc = cat.get("description", "")
                             
-                            key_label = name
-                            if desc:
+                            matched_label = None
+                            name_lower = name.lower()
+                            for template_key, template_val in _CATEGORY_KEYWORDS_TEMPLATES.items():
+                                if template_key.lower() in name_lower or name_lower in template_key.lower():
+                                    matched_label = template_val
+                                    break
+                            
+                            key_label = matched_label if matched_label else name
+                            if not matched_label and desc:
                                 key_label += f" ({desc})"
                             new_mapping[key_label] = cat_id
                     
                     if new_mapping:
                         _cached_categories = new_mapping
                         _last_sync_time = now
-                        logger.info("[Category Sync] Synced %d categories from backend.", len(new_mapping))
+                        logger.info("[Category Sync] Synced %d categories from backend with context expansion.", len(new_mapping))
         except Exception as e:
             logger.error("[Category Sync] Failed to sync categories: %s. Using cached data.", e)
             
@@ -239,7 +256,6 @@ async def _dispatch_tool(
         query = args.get("query")
         category_id = args.get("category_id")
         
-        # INTERCEPTOR PATTERN: Ép buộc lọc chi nhánh theo giỏ hàng ảo hoặc trang store hiện tại
         enforced_branch_id = None
         if chat_cart and len(chat_cart) > 0:
             first_item = chat_cart[0]
