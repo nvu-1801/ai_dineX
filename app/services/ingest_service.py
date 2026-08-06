@@ -21,7 +21,13 @@ _EMBED_MODEL = "models/text-embedding-004"
 _BATCH_SIZE = 50  # stay within Gemini batch limits
 
 # Configure Gemini once at module load
-genai.configure(api_key=settings.GEMINI_API_KEY)
+import os
+
+api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or settings.GEMINI_API_KEY
+if not api_key:
+    raise ValueError("GEMINI_API_KEY environment variable is missing.")
+
+genai.configure(api_key=api_key)
 
 
 async def ingest_menu_embeddings(db: AsyncSession) -> int:
@@ -66,6 +72,7 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
                 model=_EMBED_MODEL,
                 content=texts,
                 task_type="retrieval_document",
+                output_dimensionality=768,
             )
             embeddings: list[list[float]] = response["embedding"]
         except Exception as exc:
@@ -78,8 +85,8 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
             update_sql = text(
                 """
                 UPDATE "MenuItems"
-                SET    "Embedding" = :vec::vector
-                WHERE  "Id" = :id::uuid
+                SET    "Embedding" = CAST(:vec AS vector)
+                WHERE  "Id" = CAST(:id AS uuid)
                 """
             )
             await db.execute(update_sql, {"vec": vector_literal, "id": row["id"]})

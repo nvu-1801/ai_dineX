@@ -67,7 +67,7 @@ class ChatResponse(BaseModel):
         default=None,
         description="Structured order extracted from the user's message; null when no order intent detected",
     )
-    recommendations: list[ProductResponse] = Field(
+    recommendations: list[str] = Field(
         default_factory=list,
-        description="Ranked list of products surfaced by pgvector semantic search",
+        description="Ranked list of product names/keywords surfaced by pgvector semantic search",
     )

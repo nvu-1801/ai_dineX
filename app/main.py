@@ -1,6 +1,11 @@
 """
 DineX-AI Service — Entry Point (Phase 2)
 """
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 import logging
 
 import uvicorn

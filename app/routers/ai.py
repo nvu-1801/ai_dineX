@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, validation_alias=AliasChoices("session_id", "sessionId"))
     branch_id: Optional[str] = Field(None, validation_alias=AliasChoices("branch_id", "branchId"))
     chat_history: list[dict] = Field([], validation_alias=AliasChoices("chat_history", "chatHistory"))
+    chat_cart: list[dict] = Field([], validation_alias=AliasChoices("chat_cart", "chatCart"))
 
 
 class IngestResponse(BaseModel):
@@ -63,6 +64,8 @@ async def chat_endpoint(
             message=request.message,
             branch_id=request.branch_id,
             chat_history=request.chat_history,
+            session_id=request.session_id,
+            chat_cart=request.chat_cart,
         )
     except HTTPException:
         raise

@@ -22,7 +22,13 @@ logger = logging.getLogger("rag_service")
 
 _EMBED_MODEL = "models/text-embedding-004"
 
-genai.configure(api_key=settings.GEMINI_API_KEY)
+import os
+
+api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or settings.GEMINI_API_KEY
+if not api_key:
+    raise ValueError("GEMINI_API_KEY environment variable is missing.")
+
+genai.configure(api_key=api_key)
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +47,7 @@ async def _embed_query(query: str) -> str:
             model=_EMBED_MODEL,
             content=query,
             task_type="retrieval_query",
+            output_dimensionality=768,
         )
         vector: list[float] = response["embedding"]
         return "[" + ",".join(map(str, vector)) + "]"
@@ -65,31 +72,52 @@ def _row_to_product(row: dict) -> ProductResponse:
 async def search_products(
     db: AsyncSession,
     query: str,
+    category_id: str | None = None,
+    branch_id: str | None = None,
     limit: int = 3,
+    distance_limit: float = 0.65,
 ) -> list[ProductResponse]:
     """
-    Cosine-distance semantic search on MenuItems.Embedding (pgvector).
+    Cosine-distance semantic search on MenuItems.Embedding (pgvector) with distance threshold.
+    Supports pre-filtering by CategoryId and BranchId (via BranchMenuItems).
     Returns up to `limit` available, non-sold-out products ordered by relevance.
     """
     vector_literal = await _embed_query(query)
 
     sql = text(
         """
-        SELECT "Id"::text          AS id,
-               "Name"              AS name,
-               "PriceAmount"::text AS price,
-               "ImageUrl"          AS image_url
-        FROM   "MenuItems"
-        WHERE  "IsAvailable"  = true
-          AND  "IsSoldOut"    = false
-          AND  "Embedding"    IS NOT NULL
-        ORDER BY "Embedding" <=> :vector::vector
-        LIMIT  :limit
+        SELECT m."Id"::text          AS id,
+               m."Name"              AS name,
+               m."BasePrice"::text   AS price,
+               m."ImageUrl"          AS image_url
+        FROM   "MenuItems" m
+        WHERE  m."IsAvailable"  = true
+          AND  m."Embedding"    IS NOT NULL
+          AND  (:category_id IS NULL OR m."CategoryId" = CAST(:category_id AS uuid))
+          AND  (:branch_id IS NULL OR EXISTS (
+               SELECT 1 FROM "BranchMenuItems" bmi 
+               WHERE bmi."MenuItemId" = m."Id" 
+                 AND bmi."BranchId" = CAST(:branch_id AS uuid) 
+                 AND bmi."IsActive" = true 
+                 AND bmi."IsSoldOut" = false
+          ))
+          AND  (m."Embedding" <=> CAST(:vector AS vector)) <= :distance_limit
+        ORDER BY m."Embedding" <=> CAST(:vector AS vector)
+        LIMIT  :top_k
         """
     )
 
     try:
-        result = await db.execute(sql, {"vector": vector_literal, "limit": limit})
+        result = await db.execute(
+            sql,
+            {
+                "vector": vector_literal,
+                "top_k": limit,
+                "distance_limit": distance_limit,
+                "category_id": category_id,
+                "branch_id": branch_id,
+            },
+        )
         rows = result.mappings().all()
     except Exception as exc:
         logger.error("search_products DB error: %s", exc)
@@ -114,11 +142,11 @@ async def get_recommendations(
         """
         SELECT m."Id"::text          AS id,
                m."Name"              AS name,
-               m."PriceAmount"::text AS price,
+               m."BasePrice"::text   AS price,
                m."ImageUrl"          AS image_url
         FROM   "ItemRelations" r
         JOIN   "MenuItems"     m ON r."TargetItemId" = m."Id"
-        WHERE  r."SourceItemId" = ANY(:source_ids::uuid[])
+        WHERE  r."SourceItemId" = ANY(CAST(:source_ids AS uuid[]))
           AND  m."IsAvailable"  = true
         ORDER BY r."Weight" DESC
         LIMIT  :limit
