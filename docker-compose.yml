@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  ai_dinex_service:
+    build: .
+    container_name: dinex_ai_core
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./chroma_db:/app/chroma_db

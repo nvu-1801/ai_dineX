@@ -1,49 +1,63 @@
-import os
-# pyrefly: ignore [missing-import]
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+"""
+DineX-AI Service — Entry Point (Phase 2)
+"""
 from dotenv import load_dotenv
-from app.services.rag_service import RagService, ChatRequest, IngestRequest, ChatAssistantResponse
+import os
 
-# Load environment variables
 load_dotenv()
+
+import logging
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.routers.ai import router as ai_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
+)
+logger = logging.getLogger("main")
 
 app = FastAPI(
     title="DineX RAG AI Service",
-    description="Python FastAPI service for DineX AI Assistant RAG pipeline.",
-    version="1.0.0"
+    description="FastAPI microservice — Gemini RAG pipeline with pgvector + GraphRAG. Sits behind .NET 10 API Gateway.",
+    version="2.0.0",
 )
 
-# Enable CORS for gateway access
+# ---------------------------------------------------------------------------
+# CORS — allow Gateway and local dev origins
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],           # tighten to gateway domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-rag_service = RagService()
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+app.include_router(ai_router)
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "gemini_enabled": os.getenv("GEMINI_API_KEY") is not None}
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+@app.get("/health", tags=["Health"])
+async def health_check() -> dict:
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "gemini_enabled": bool(settings.GEMINI_API_KEY),
+        "db_url_prefix": settings.DATABASE_URL[:35] + "...",
+    }
 
-@app.post("/chat", response_model=ChatAssistantResponse)
-async def chat(request: ChatRequest):
-    try:
-        response = await rag_service.generate_chat_response(request)
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating chat response: {str(e)}")
 
-@app.post("/ingest")
-async def ingest(request: IngestRequest):
-    success = await rag_service.ingest_documents(request.branch_id, request.documents)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to ingest documents.")
-    return {"status": "success", "message": f"Successfully ingested {len(request.documents)} documents."}
-
+# ---------------------------------------------------------------------------
+# Local dev runner
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
