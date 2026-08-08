@@ -4,11 +4,17 @@ FROM python:3.12-slim
 # Thiết lập thư mục làm việc bên trong container
 WORKDIR /app
 
-# Cài đặt các gói phụ thuộc hệ thống cần thiết cho biên dịch (nếu có)
+# Cài đặt các gói phụ thuộc hệ thống cần thiết cho biên dịch C++ (g++, gcc, python3-dev cho chroma-hnswlib)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    g++ \
+    gcc \
+    python3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Nâng cấp pip, setuptools, wheel trước khi cài đặt requirements
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy file requirements trước để tận dụng cơ chế caching của Docker
 COPY requirements.txt .
