@@ -2,26 +2,57 @@ name: Deploy AI Service to VPS
 
 on:
   push:
-    branches: [ "dev", "main", "master", "Vu-main" ]
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
 
 jobs:
-  deploy:
+  validate:
+    name: Validate Python Environment & Dependencies
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up SSH Connection & Deploy
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USERNAME }}
-        key: ${{ secrets.VPS_SSH_KEY }}
-        port: ${{ secrets.VPS_PORT }}
-        script: |
-          cd ~/ai_dineX
-          git pull
-          sudo docker compose down
-          sudo docker compose up -d --build
-          sudo docker system prune -f
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+  deploy:
+    name: Deploy AI Service to VPS
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH and Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/ai_dineX
+
+            git fetch origin
+            git reset --hard origin/main
+
+            docker compose --env-file .env build ai_dinex
+            docker compose --env-file .env up -d --no-deps ai_dinex
+
+            docker image prune -f
