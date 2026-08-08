@@ -15,10 +15,10 @@ jobs:
     - name: Set up SSH Connection & Deploy
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ secrets.VPS_HOST }}       # IP của VPS (103.90.225.95)
-        username: ${{ secrets.VPS_USER }}    # User trên VPS (hien)
-        key: ${{ secrets.VPS_SSH_KEY }}      # Private SSH Key của bạn
-        port: 22
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT }}
         script: |
           cd ~/ai_dineX
           git pull
