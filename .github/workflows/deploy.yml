@@ -1,0 +1,27 @@
+name: Deploy AI Service to VPS
+
+on:
+  push:
+    branches: [ "dev", "main", "master", "Vu-main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up SSH Connection & Deploy
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPS_HOST }}       # IP của VPS (103.90.225.95)
+        username: ${{ secrets.VPS_USER }}    # User trên VPS (hien)
+        key: ${{ secrets.VPS_SSH_KEY }}      # Private SSH Key của bạn
+        port: 22
+        script: |
+          cd ~/ai_dineX
+          git pull
+          sudo docker compose down
+          sudo docker compose up -d --build
+          sudo docker system prune -f
