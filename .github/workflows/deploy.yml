@@ -3,14 +3,12 @@ name: Deploy AI Service to VPS
 on:
   push:
     branches:
-      - main
-      - master
-      - develop
+      - Vu-main
+      - dev
   pull_request:
     branches:
-      - main
-      - master
-      - develop
+      - Vu-main
+      - dev
 
 jobs:
   validate:
