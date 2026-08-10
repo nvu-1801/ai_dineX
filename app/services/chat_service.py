@@ -33,11 +33,7 @@ import os
 import time
 import httpx
 
-api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or settings.GEMINI_API_KEY
-if not api_key:
-    raise ValueError("GEMINI_API_KEY environment variable is missing.")
-
-genai.configure(api_key=api_key)
+from app.services.key_manager import call_llm_api_with_fallback
 
 # ---------------------------------------------------------------------------
 # Dynamic Category Sync Cache from .NET
@@ -424,8 +420,16 @@ async def handle_chat(
             recommendations=products
         )
 
-    # 1. Semantic product search to build context (scoped by branch_id if provided)
-    products: list[ProductResponse] = await search_products(db, message, branch_id=branch_id, limit=5)
+    # 0.5 Extract locked branch_id from chat_cart if branch_id was not explicitly passed
+    active_branch_id = branch_id
+    if not active_branch_id and chat_cart and len(chat_cart) > 0:
+        first_item_branch = chat_cart[0].get("branchId") or chat_cart[0].get("branch_id")
+        if first_item_branch:
+            active_branch_id = str(first_item_branch)
+            logger.info("[Branch Lock] Locked search context to cart branch: %s", active_branch_id)
+
+    # 1. Semantic product search to build context (scoped by active_branch_id if provided)
+    products: list[ProductResponse] = await search_products(db, message, branch_id=active_branch_id, limit=5)
 
     product_context = "\n".join(
         f"- {p.name}: {p.price:,.0f}đ (id={p.id})"
@@ -468,13 +472,15 @@ async def handle_chat(
     )
 
     # 4. Gemini generate_content_async — tool-call loop
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=dynamic_instruction,
-        tools=_TOOLS,
-    )
+    async def _generate(prompt_contents=contents):
+        m = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=dynamic_instruction,
+            tools=_TOOLS,
+        )
+        return await m.generate_content_async(prompt_contents)
 
-    response = await model.generate_content_async(contents)
+    response = await call_llm_api_with_fallback(_generate, contents)
 
     # Tool-call dispatch loop (max 3 rounds to prevent infinite loops)
     for _ in range(3):
@@ -496,7 +502,7 @@ async def handle_chat(
             args=tool_args,
             db=db,
             chat_cart=chat_cart,
-            fallback_branch_id=branch_id
+            fallback_branch_id=active_branch_id
         )
 
         # Feed result back to Gemini
@@ -513,7 +519,7 @@ async def handle_chat(
             ],
         })
 
-        response = await model.generate_content_async(contents)
+        response = await call_llm_api_with_fallback(_generate, contents)
 
     # 4. Extract final text reply
     try:
@@ -541,7 +547,7 @@ async def handle_chat(
 
     # 6. Fetch cross-sell recommendations based on matched product IDs
     matched_ids = [str(p.id) for p in products]
-    recommendations = await get_recommendations(db, matched_ids, limit=2)
+    recommendations = await get_recommendations(db, matched_ids, branch_id=active_branch_id, limit=2)
 
     # Merge: search results + cross-sells, deduplicated, capped at 5
     seen: set[str] = {str(p.id) for p in products}

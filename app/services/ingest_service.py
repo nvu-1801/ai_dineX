@@ -21,13 +21,7 @@ _EMBED_MODEL = "models/text-embedding-004"
 _BATCH_SIZE = 50  # stay within Gemini batch limits
 
 # Configure Gemini once at module load
-import os
-
-api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or settings.GEMINI_API_KEY
-if not api_key:
-    raise ValueError("GEMINI_API_KEY environment variable is missing.")
-
-genai.configure(api_key=api_key)
+from app.services.key_manager import call_llm_api_with_fallback
 
 
 async def ingest_menu_embeddings(db: AsyncSession) -> int:
@@ -67,13 +61,16 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
             f"{r['name']}. {r['description'] or ''}".strip() for r in batch
         ]
 
-        try:
-            response = genai.embed_content(
+        def _embed_batch(batch_texts=texts):
+            return genai.embed_content(
                 model=_EMBED_MODEL,
-                content=texts,
+                content=batch_texts,
                 task_type="retrieval_document",
                 output_dimensionality=768,
             )
+
+        try:
+            response = await call_llm_api_with_fallback(_embed_batch)
             embeddings: list[list[float]] = response["embedding"]
         except Exception as exc:
             logger.error("Gemini embedding error on batch starting %d: %s", batch_start, exc)

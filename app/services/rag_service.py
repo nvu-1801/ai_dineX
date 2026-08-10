@@ -28,7 +28,7 @@ api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or settings
 if not api_key:
     raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-genai.configure(api_key=api_key)
+from app.services.key_manager import call_llm_api_with_fallback
 
 
 # ---------------------------------------------------------------------------
@@ -39,16 +39,18 @@ async def _embed_query(query: str) -> str:
     """
     Generate a Gemini embedding for a single query string and return it
     as a pgvector-compatible literal string: '[0.1,0.2,...]'.
-    Sử dụng asyncio.to_thread để ngăn chặn Blocking Event Loop của FastAPI.
+    Runs with automatic key fallback.
     """
-    try:
-        response = await asyncio.to_thread(
-            genai.embed_content,
+    def _do_embed():
+        return genai.embed_content(
             model=_EMBED_MODEL,
             content=query,
             task_type="retrieval_query",
             output_dimensionality=768,
         )
+
+    try:
+        response = await call_llm_api_with_fallback(_do_embed)
         vector: list[float] = response["embedding"]
         return "[" + ",".join(map(str, vector)) + "]"
     except Exception as exc:
@@ -129,11 +131,13 @@ async def search_products(
 async def get_recommendations(
     db: AsyncSession,
     source_item_ids: list[str],
+    branch_id: str | None = None,
     limit: int = 2,
 ) -> list[ProductResponse]:
     """
     GraphRAG cross-sell/up-sell lookup via ItemRelations.
     Returns up to `limit` related available products ordered by relation Weight.
+    Supports pre-filtering by BranchId if branch_id is provided.
     """
     if not source_item_ids:
         return []
@@ -148,6 +152,13 @@ async def get_recommendations(
         JOIN   "MenuItems"     m ON r."TargetItemId" = m."Id"
         WHERE  r."SourceItemId" = ANY(CAST(:source_ids AS uuid[]))
           AND  m."IsAvailable"  = true
+          AND  (:branch_id IS NULL OR EXISTS (
+               SELECT 1 FROM "BranchMenuItems" bmi 
+               WHERE bmi."MenuItemId" = m."Id" 
+                 AND bmi."BranchId" = CAST(:branch_id AS uuid) 
+                 AND bmi."IsActive" = true 
+                 AND bmi."IsSoldOut" = false
+          ))
         ORDER BY r."Weight" DESC
         LIMIT  :limit
         """
@@ -156,7 +167,11 @@ async def get_recommendations(
     try:
         result = await db.execute(
             sql,
-            {"source_ids": source_item_ids, "limit": limit},
+            {
+                "source_ids": source_item_ids,
+                "branch_id": branch_id,
+                "limit": limit,
+            },
         )
         rows = result.mappings().all()
     except Exception as exc:
@@ -164,3 +179,4 @@ async def get_recommendations(
         raise HTTPException(status_code=500, detail="Recommendation lookup failed.") from exc
 
     return [_row_to_product(dict(r)) for r in rows]
+
