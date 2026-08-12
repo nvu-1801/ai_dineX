@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.schemas import ChatResponse, OrderDraft, OrderItemDraft, ProductResponse
-from app.services.rag_service import get_recommendations, search_products
+from app.services.rag_service import extract_food_query, get_recommendations, search_products
 from app.services.tools_service import (
     calculate_total_price,
     generate_payment_qr,
@@ -279,9 +279,10 @@ async def _dispatch_tool(
             args.get("branch_id")
         )
         
+        clean_q = extract_food_query(query) if query else query
         products = await search_products(
             db=db,
-            query=query,
+            query=clean_q,
             category_id=category_id,
             branch_id=enforced_branch_id,
             limit=5
@@ -429,7 +430,9 @@ async def handle_chat(
             logger.info("[Branch Lock] Locked search context to cart branch: %s", active_branch_id)
 
     # 1. Semantic product search to build context (scoped by active_branch_id if provided)
-    products: list[ProductResponse] = await search_products(db, message, branch_id=active_branch_id, limit=5)
+    search_query = extract_food_query(message)
+    logger.info("[Chat Service] Cleaned search query: '%s' from raw message: '%s'", search_query, message)
+    products: list[ProductResponse] = await search_products(db, search_query, branch_id=active_branch_id, limit=5)
 
     product_context = "\n".join(
         f"- {p.name}: {p.price:,.0f}đ (id={p.id})"
