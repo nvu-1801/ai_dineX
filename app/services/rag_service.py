@@ -80,12 +80,15 @@ def extract_food_query(text: str) -> str:
     cleaned = text.strip()
 
     prefix_patterns = [
-        r"^(tôi|mình|em|anh|chị)\s+(muốn|thèm|cần)\s+(ăn|uống|gọi|mua|tìm)?\s*(món)?\s*",
+        r"^(dạ\s+)?(cho\s+)?(tôi|mình|em|anh|chị)\s+hỏi\s*",
+        r"^(bên\s+mình|bên\s+em|bên\s+anh|bên\s+quán|quán|cửa\s+hàng|nhà\s+hàng|ở\s+đây)\s*(có\s+bán|có|bán)?\s*",
+        r"^(tôi|mình|em|anh|chị)\s+(muốn|thèm|cần)\s+(ăn|uống|gọi|mua|đặt|tìm)?\s*(món|đồ\s+ăn|đồ\s+uống)?\s*",
         r"^(tôi|mình|em|anh|chị)\s+(muốn|thèm|cần)\s*",
-        r"^(cho\s+)?(tôi|mình|em|anh|chị)\s+(ăn|uống|gọi|xin)?\s*(món)?\s*",
-        r"^(cho\s+xin|bán\s+cho|đặt\s+cho)\s+(tôi|mình|em|anh|chị)?\s*(món)?\s*",
+        r"^(cho\s+)?(tôi|mình|em|anh|chị)\s+(ăn|uống|gọi|xin|mua|đặt)?\s*(món|đồ\s+ăn|đồ\s+uống)?\s*",
+        r"^(cho\s+xin|bán\s+cho|đặt\s+cho)\s+(tôi|mình|em|anh|chị)?\s*(món|đồ\s+ăn|đồ\s+uống)?\s*",
         r"^(muốn|thèm)\s+(ăn|uống|món)?\s*",
-        r"^(cần\s+tìm|tìm\s+món|tìm|gợi\s+ý\s+món|tư\s+vấn\s+món|có\s+món|món)\s*",
+        r"^(tư\s+vấn|gợi\s+ý|tìm\s+kiếm|cần\s+tìm|tìm\s+món|tìm)\s+(giúp\s+)?(tôi|mình|em|anh|chị)?\s*(món|đồ\s+ăn|đồ\s+uống)?\s*",
+        r"^(có\s+bán|có|bán)\s+(món)?\s*",
         r"^(cho\s+1|cho\s+2|cho\s+3|cho\s+\d+)\s*",
     ]
 
@@ -99,7 +102,7 @@ def extract_food_query(text: str) -> str:
                 changed = True
 
     suffix_patterns = [
-        r"\s+(không\s+ạ|khong\s+a|ko\s+a|không|khong|ko|nhé|nhe|nha|ạ|a|với|voi|giúp tôi|giúp mình)\??$",
+        r"\s+(không\s+ạ|khong\s+a|ko\s+a|không|khong|ko|nhé|nhe|nha|ạ|a|với|voi|giúp tôi|giúp mình|giúp em|hỏi với|với ạ)\??$",
     ]
     for pat in suffix_patterns:
         subbed = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
