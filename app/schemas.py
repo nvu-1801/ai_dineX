@@ -71,3 +71,27 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="Ranked list of product names/keywords surfaced by pgvector semantic search",
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — Personalized Recommendation Schemas
+# ---------------------------------------------------------------------------
+
+class PersonalizedRecommendationRequest(BaseModel):
+    user_id: UUID = Field(description="User ID to fetch history for")
+    branch_id: Optional[UUID] = Field(default=None, description="Optional branch ID filter")
+    limit: int = Field(default=9, ge=1, le=20, description="Max number of recommended items")
+
+
+class PersonalizedProductItem(BaseModel):
+    id: UUID
+    name: str
+    price: float
+    image_url: Optional[str] = None
+    reason: Optional[str] = Field(default="Gợi ý dành riêng cho bạn", description="Rationale for recommendation")
+
+
+class PersonalizedRecommendationResponse(BaseModel):
+    user_id: UUID
+    recommendations: list[PersonalizedProductItem] = Field(default_factory=list)
+

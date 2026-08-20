@@ -16,9 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.schemas import ChatResponse
+from app.schemas import (
+    ChatResponse,
+    PersonalizedRecommendationRequest,
+    PersonalizedRecommendationResponse,
+    PersonalizedProductItem,
+)
 from app.services.chat_service import handle_chat
 from app.services.ingest_service import ingest_menu_embeddings
+from app.services.rag_service import get_user_personalized_recommendations
 
 logger = logging.getLogger("router.ai")
 
@@ -108,3 +114,36 @@ async def ingest_endpoint(
     except Exception as exc:
         logger.exception("Unhandled error in /api/ai/ingest")
         raise HTTPException(status_code=500, detail=f"Ingestion error: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/ai/recommendations/personalized
+# ---------------------------------------------------------------------------
+
+@router.post("/recommendations/personalized", response_model=PersonalizedRecommendationResponse, summary="Get AI personalized recommendations")
+async def personalized_recommendations_endpoint(
+    request: PersonalizedRecommendationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PersonalizedRecommendationResponse:
+    """
+    Returns AI-generated personalized menu item recommendations based on the user's
+    order history and search history using pgvector cosine similarity.
+    """
+    try:
+        raw_recs = await get_user_personalized_recommendations(
+            db=db,
+            user_id=str(request.user_id),
+            branch_id=str(request.branch_id) if request.branch_id else None,
+            limit=request.limit,
+        )
+        recommendations = [PersonalizedProductItem(**r) for r in raw_recs]
+        return PersonalizedRecommendationResponse(
+            user_id=request.user_id,
+            recommendations=recommendations
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unhandled error in /api/ai/recommendations/personalized")
+        raise HTTPException(status_code=500, detail=f"Personalized recommendation error: {exc}") from exc
+
