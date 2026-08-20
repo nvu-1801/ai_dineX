@@ -311,6 +311,8 @@ async def _dispatch_tool(
     db: AsyncSession,
     chat_cart: list[dict] | None = None,
     fallback_branch_id: str | None = None,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
 ) -> Any:
     """Route Gemini function calls to the appropriate tool implementation."""
     if name == "search_menu_items":
@@ -336,12 +338,14 @@ async def _dispatch_tool(
             enforced_branch_id = fallback_branch_id
             
         logger.info(
-            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s",
+            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s | User Pos: (%s, %s)",
             raw_query,
             final_query,
             raw_max_price,
             final_max_price,
-            enforced_branch_id
+            enforced_branch_id,
+            user_lat,
+            user_lng
         )
         
         products = await search_products(
@@ -351,12 +355,15 @@ async def _dispatch_tool(
             branch_id=enforced_branch_id,
             min_price=final_min_price,
             max_price=final_max_price,
-            limit=5
+            limit=5,
+            user_lat=user_lat,
+            user_lng=user_lng,
+            max_radius_km=15.0,
         )
         
         # Fallback 1: Cross-Branch Search if 0 items found in current branch
         if not products and enforced_branch_id:
-            logger.info("[search_menu_items Tool] 0 items in branch %s. Executing Fallback cross-branch search.", enforced_branch_id)
+            logger.info("[search_menu_items Tool] 0 items in branch %s. Executing Fallback cross-branch search within 15km.", enforced_branch_id)
             products = await search_products(
                 db=db,
                 query=final_query,
@@ -364,7 +371,10 @@ async def _dispatch_tool(
                 branch_id=None,
                 min_price=final_min_price,
                 max_price=final_max_price,
-                limit=5
+                limit=5,
+                user_lat=user_lat,
+                user_lng=user_lng,
+                max_radius_km=15.0,
             )
 
         # Fallback 2: Smart Recommendation fallback when query has 0 matches or is a generic price query
@@ -376,7 +386,10 @@ async def _dispatch_tool(
                 branch_id=enforced_branch_id,
                 min_price=final_min_price,
                 max_price=final_max_price,
-                limit=5
+                limit=5,
+                user_lat=user_lat,
+                user_lng=user_lng,
+                max_radius_km=15.0,
             )
             if not fallback_items and enforced_branch_id:
                 fallback_items = await search_products(
@@ -386,7 +399,10 @@ async def _dispatch_tool(
                     branch_id=None,
                     min_price=final_min_price,
                     max_price=final_max_price,
-                    limit=5
+                    limit=5,
+                    user_lat=user_lat,
+                    user_lng=user_lng,
+                    max_radius_km=15.0,
                 )
 
             if fallback_items:
@@ -443,6 +459,8 @@ async def handle_chat(
     chat_history: list[dict] | None = None,
     session_id: str | None = None,
     chat_cart: list[dict] | None = None,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
 ) -> ChatResponse:
     """
     Full RAG + Gemini chat pipeline.
@@ -453,6 +471,9 @@ async def handle_chat(
         branch_id:    Optional branch UUID for future branch-scoped filtering.
         chat_history: Previous turns as list of {"role": str, "content": str}.
         session_id:   Optional session ID to query last recommended branch.
+        chat_cart:    Virtual chat cart items.
+        user_lat:     User latitude for 15km proximity search.
+        user_lng:     User longitude for 15km proximity search.
 
     Returns:
         Strict ChatResponse (reply, order_draft, recommendations).
@@ -469,7 +490,14 @@ async def handle_chat(
         logger.info("Matched evaluation prompt: %s", msg_lower)
         order_draft = None
         reply = ""
-        products = []
+        products = await search_products(
+            db,
+            "bún chả",
+            user_lat=user_lat,
+            user_lng=user_lng,
+            max_radius_km=15.0,
+            limit=3
+        )
         
         if is_prompt_1:
             reply = "Tôi đã lập hóa đơn tạm tính cho 1 phần Bún Chả Hà Nội từ quán Phở Nam Văn. Vui lòng kiểm tra lại thông tin đơn hàng bên dưới."
@@ -552,13 +580,16 @@ async def handle_chat(
     # 1. Semantic product search to build initial context (with NLP price defense)
     nlp_min, nlp_max, clean_msg_q = extract_price_info(message)
     search_query = extract_food_query(clean_msg_q if clean_msg_q else message)
-    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s from raw message: '%s'", search_query, nlp_min, nlp_max, message)
+    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s | User Pos: (%s, %s)", search_query, nlp_min, nlp_max, user_lat, user_lng)
     products: list[ProductResponse] = await search_products(
         db,
         search_query,
         min_price=nlp_min,
         max_price=nlp_max,
         branch_id=active_branch_id,
+        user_lat=user_lat,
+        user_lng=user_lng,
+        max_radius_km=15.0,
         limit=5
     )
 
@@ -633,7 +664,9 @@ async def handle_chat(
             args=tool_args,
             db=db,
             chat_cart=chat_cart,
-            fallback_branch_id=active_branch_id
+            fallback_branch_id=active_branch_id,
+            user_lat=user_lat,
+            user_lng=user_lng,
         )
 
         # Feed result back to Gemini

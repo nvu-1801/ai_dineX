@@ -259,11 +259,14 @@ async def search_products(
     max_price: float | None = None,
     limit: int = 3,
     distance_limit: float = 0.65,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
+    max_radius_km: float = 15.0,
 ) -> list[ProductResponse]:
     """
     Hybrid Multi-Tier Search (Exact -> Multi-Token AND LIKE -> Vector pgvector).
     Handles 3-4-5 word exact dish names regardless of word order or punctuation.
-    Supports pre-filtering by CategoryId, BranchId, MinPrice, and MaxPrice.
+    Enforces 15km user location radius filtering (matching Nearby Stores & Hot Deals).
     """
     extracted_min, extracted_max, clean_q = extract_price_info(query)
     final_min_price = min_price if min_price is not None else extracted_min
@@ -275,17 +278,22 @@ async def search_products(
         "món", "đồ ăn", "thực đơn", "các món", "bán", "quán", "đồ uống", "top", "ngon", "bán chạy", "hot", "gợi ý", "nổi tiếng", "top món", "top món ăn", "top món ngon"
     ]
 
+    effective_lat = user_lat if user_lat is not None else 10.776889
+    effective_lng = user_lng if user_lng is not None else 106.700806
+
     logger.info(
-        "[search_products] Raw query: '%s' -> Clean query: '%s' | Price range: [%s, %s] | Is Price-Only: %s",
+        "[search_products] Raw query: '%s' -> Clean query: '%s' | Price range: [%s, %s] | User Pos: (%s, %s) | Max Radius: %s km",
         query,
         search_text,
         final_min_price,
         final_max_price,
-        is_price_only
+        effective_lat,
+        effective_lng,
+        max_radius_km
     )
 
     if is_price_only:
-        # Nhánh 1: Truy vấn thuần túy theo giá (Bypass pgvector distance check)
+        # Nhánh 1: Truy vấn thuần túy theo giá với 15km Radius Filter
         sql_str = """
             SELECT m."Id"::text          AS id,
                    m."Name"              AS name,
@@ -300,11 +308,29 @@ async def search_products(
               AND (:category_id IS NULL OR m."CategoryId" = CAST(:category_id AS uuid))
               AND (:branch_id IS NULL OR EXISTS (
                    SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
                    WHERE bmi."MenuItemId" = m."Id" 
                      AND bmi."BranchId" = CAST(:branch_id AS uuid) 
                      AND bmi."IsActive" = true 
                      AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
               ))
+              AND (
+                :branch_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
+                   WHERE bmi."MenuItemId" = m."Id" 
+                     AND bmi."IsActive" = true 
+                     AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
+                )
+              )
             ORDER BY m."BasePrice" ASC
             LIMIT :top_k
         """
@@ -314,6 +340,9 @@ async def search_products(
             "branch_id": branch_id,
             "min_price": final_min_price,
             "max_price": final_max_price,
+            "user_lat": effective_lat,
+            "user_lng": effective_lng,
+            "max_radius_km": max_radius_km,
         }
         try:
             result = await db.execute(text(sql_str), params)
@@ -323,7 +352,7 @@ async def search_products(
             logger.error("search_products Price-Only DB error: %s", exc)
             raise HTTPException(status_code=500, detail="Product search failed.") from exc
 
-    # Nhánh 2: Hybrid Search (Match Exact -> Token LIKE -> pgvector Cosine Search)
+    # Nhánh 2: Hybrid Search với 15km Radius Filter
     vector_literal = await _embed_query(search_text)
     tokens = extract_search_tokens(search_text)
 
@@ -336,6 +365,9 @@ async def search_products(
         "branch_id": branch_id,
         "min_price": final_min_price,
         "max_price": final_max_price,
+        "user_lat": effective_lat,
+        "user_lng": effective_lng,
+        "max_radius_km": max_radius_km,
     }
 
     token_conditions = []
@@ -373,11 +405,29 @@ async def search_products(
               AND (:category_id IS NULL OR m."CategoryId" = CAST(:category_id AS uuid))
               AND (:branch_id IS NULL OR EXISTS (
                    SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
                    WHERE bmi."MenuItemId" = m."Id" 
                      AND bmi."BranchId" = CAST(:branch_id AS uuid) 
                      AND bmi."IsActive" = true 
                      AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
               ))
+              AND (
+                :branch_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
+                   WHERE bmi."MenuItemId" = m."Id" 
+                     AND bmi."IsActive" = true 
+                     AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
+                )
+              )
               AND (
                   (m."Embedding" IS NOT NULL AND (m."Embedding" <=> CAST(:vector AS vector)) <= :distance_limit)
                   OR LOWER(m."Name") LIKE :exact_pattern

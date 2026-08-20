@@ -47,6 +47,11 @@ router = APIRouter(prefix="/api/ai", tags=["AI"], dependencies=[Depends(verify_a
 # Request models (internal to this router only)
 # ---------------------------------------------------------------------------
 
+class UserLocationSchema(BaseModel):
+    latitude: Optional[float] = Field(None, validation_alias=AliasChoices("latitude", "lat"))
+    longitude: Optional[float] = Field(None, validation_alias=AliasChoices("longitude", "lng"))
+
+
 class ChatRequest(BaseModel):
     message: str = Field(
         ...,
@@ -58,6 +63,7 @@ class ChatRequest(BaseModel):
     branch_id: Optional[str] = Field(None, validation_alias=AliasChoices("branch_id", "branchId"))
     chat_history: list[dict] = Field([], validation_alias=AliasChoices("chat_history", "chatHistory"))
     chat_cart: list[dict] = Field([], validation_alias=AliasChoices("chat_cart", "chatCart"))
+    user_location: Optional[UserLocationSchema] = Field(None, validation_alias=AliasChoices("user_location", "userLocation"))
 
 
 class IngestResponse(BaseModel):
@@ -78,6 +84,9 @@ async def chat_endpoint(
     Accepts a user message, runs the full RAG pipeline (pgvector search +
     Gemini tool-call loop), and returns a strict ChatResponse.
     """
+    user_lat = request.user_location.latitude if request.user_location else None
+    user_lng = request.user_location.longitude if request.user_location else None
+
     try:
         return await handle_chat(
             db=db,
@@ -86,6 +95,8 @@ async def chat_endpoint(
             chat_history=request.chat_history,
             session_id=request.session_id,
             chat_cart=request.chat_cart,
+            user_lat=user_lat,
+            user_lng=user_lng,
         )
     except HTTPException:
         raise
