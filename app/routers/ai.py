@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
-from pydantic import BaseModel, Field, AliasChoices
+from pydantic import BaseModel, Field, AliasChoices, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -47,6 +47,17 @@ router = APIRouter(prefix="/api/ai", tags=["AI"], dependencies=[Depends(verify_a
 # Request models (internal to this router only)
 # ---------------------------------------------------------------------------
 
+class UserLocationSchema(BaseModel):
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0, validation_alias=AliasChoices("latitude", "lat"))
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0, validation_alias=AliasChoices("longitude", "lng"))
+
+    @model_validator(mode="after")
+    def validate_both_coordinates(self):
+        if (self.latitude is None and self.longitude is not None) or (self.latitude is not None and self.longitude is None):
+            raise ValueError("Both latitude and longitude must be provided together.")
+        return self
+
+
 class ChatRequest(BaseModel):
     message: str = Field(
         ...,
@@ -58,6 +69,7 @@ class ChatRequest(BaseModel):
     branch_id: Optional[str] = Field(None, validation_alias=AliasChoices("branch_id", "branchId"))
     chat_history: list[dict] = Field([], validation_alias=AliasChoices("chat_history", "chatHistory"))
     chat_cart: list[dict] = Field([], validation_alias=AliasChoices("chat_cart", "chatCart"))
+    user_location: Optional[UserLocationSchema] = Field(None, validation_alias=AliasChoices("user_location", "userLocation"))
 
 
 class IngestResponse(BaseModel):
@@ -78,6 +90,9 @@ async def chat_endpoint(
     Accepts a user message, runs the full RAG pipeline (pgvector search +
     Gemini tool-call loop), and returns a strict ChatResponse.
     """
+    user_lat = request.user_location.latitude if request.user_location else None
+    user_lng = request.user_location.longitude if request.user_location else None
+
     try:
         return await handle_chat(
             db=db,
@@ -86,6 +101,8 @@ async def chat_endpoint(
             chat_history=request.chat_history,
             session_id=request.session_id,
             chat_cart=request.chat_cart,
+            user_lat=user_lat,
+            user_lng=user_lng,
         )
     except HTTPException:
         raise
@@ -100,14 +117,15 @@ async def chat_endpoint(
 
 @router.post("/ingest", response_model=IngestResponse, summary="Ingest MenuItems embeddings")
 async def ingest_endpoint(
+    force_reembed: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> IngestResponse:
     """
-    Queries all MenuItems with NULL Embedding, generates vectors via Gemini,
-    and bulk-upserts them into the pgvector column.
+    Queries all MenuItems with NULL Embedding (or all items if force_reembed is True),
+    generates vectors via Gemini gemini-embedding-001, and bulk-upserts them into the pgvector column.
     """
     try:
-        processed_count = await ingest_menu_embeddings(db)
+        processed_count = await ingest_menu_embeddings(db, force_reembed=force_reembed)
         return IngestResponse(status="success", processed_count=processed_count)
     except HTTPException:
         raise

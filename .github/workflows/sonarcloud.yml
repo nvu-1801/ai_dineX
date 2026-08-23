@@ -1,0 +1,51 @@
+name: SonarCloud Code Analysis
+
+on:
+  push:
+    branches:
+      - Vu-main
+      - dev
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - Vu-main
+      - dev
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies & Coverage Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary :all: -r requirements.txt || pip install -r requirements.txt
+          pip install pytest==8.2.0 pytest-cov==5.0.0
+
+      - name: Run Tests with Coverage
+        run: |
+          pytest --cov=app --cov-report=xml
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@0303d6304eed0773692377c846ae56612ec1d936 # v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

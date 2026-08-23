@@ -17,28 +17,29 @@ from app.config import settings
 logger = logging.getLogger("ingest_service")
 
 # Gemini embedding model
-_EMBED_MODEL = "models/text-embedding-004"
+_EMBED_MODEL = "models/gemini-embedding-001"
 _BATCH_SIZE = 50  # stay within Gemini batch limits
 
 # Configure Gemini once at module load
 from app.services.key_manager import call_llm_api_with_fallback
 
 
-async def ingest_menu_embeddings(db: AsyncSession) -> int:
+async def ingest_menu_embeddings(db: AsyncSession, force_reembed: bool = False) -> int:
     """
-    Embed all MenuItems where Embedding IS NULL.
+    Embed all MenuItems where Embedding IS NULL (or all items if force_reembed=True).
 
     Returns:
         Number of rows updated.
     """
     # 1. Fetch items that need embeddings
+    where_clause = "" if force_reembed else 'WHERE "Embedding" IS NULL'
     fetch_sql = text(
-        """
+        f"""
         SELECT "Id"::text AS id,
                "Name"       AS name,
                "Description" AS description
         FROM   "MenuItems"
-        WHERE  "Embedding" IS NULL
+        {where_clause}
         LIMIT  1000
         """
     )
@@ -72,8 +73,8 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
         try:
             response = await call_llm_api_with_fallback(_embed_batch)
             embeddings: list[list[float]] = response["embedding"]
-        except Exception as exc:
-            logger.error("Gemini embedding error on batch starting %d: %s", batch_start, exc)
+        except Exception:
+            logger.exception("Gemini embedding error on batch starting %d", batch_start)
             raise
 
         # 3. Bulk-update each row — pgvector accepts cast from text literal
@@ -93,3 +94,43 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
         logger.info("Committed batch — cumulative processed: %d", processed)
 
     return processed
+
+
+import asyncio
+from app.database import AsyncSessionLocal
+
+
+async def auto_ingestion_worker():
+    """
+    Background worker:
+    1. Runs immediately on application startup to ingest any missing embeddings.
+    2. Repeats periodically every 48 hours (2 days).
+    """
+    CHECK_INTERVAL_SECONDS = 48 * 60 * 60  # 48 hours
+
+    logger.info("[Auto-Ingestion Worker] Initialized. Starting startup scan...")
+
+    while True:
+        try:
+            total_processed = 0
+            while True:
+                async with AsyncSessionLocal() as session:
+                    count = await ingest_menu_embeddings(session)
+                    total_processed += count
+                    if count < 1000:
+                        break
+
+            if total_processed > 0:
+                logger.info("[Auto-Ingestion Worker] Successfully generated embeddings for %d new items.", total_processed)
+            else:
+                logger.info("[Auto-Ingestion Worker] Menu vector database is up-to-date (0 items pending).")
+        except Exception:
+            logger.exception("[Auto-Ingestion Worker] Error during scheduled ingest")
+
+        logger.info("[Auto-Ingestion Worker] Sleeping for %d hours until next scan...", CHECK_INTERVAL_SECONDS // 3600)
+        try:
+            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            logger.info("[Auto-Ingestion Worker] Worker task cancelled. Shutting down gracefully.")
+            raise
+

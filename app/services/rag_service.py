@@ -21,7 +21,7 @@ from app.schemas import ProductResponse
 
 logger = logging.getLogger("rag_service")
 
-_EMBED_MODEL = "models/text-embedding-004"
+_EMBED_MODEL = "models/gemini-embedding-001"
 
 import os
 
@@ -55,7 +55,7 @@ async def _embed_query(query: str) -> str:
         vector: list[float] = response["embedding"]
         return "[" + ",".join(map(str, vector)) + "]"
     except Exception as exc:
-        logger.error("[RAG Service] Lỗi khi tạo embedding: %s", exc)
+        logger.exception("[RAG Service] Lỗi khi tạo embedding")
         raise HTTPException(status_code=502, detail=f"Embedding generation failed: {exc}") from exc
 
 
@@ -148,21 +148,114 @@ def extract_price_info(text: str) -> tuple[float | None, float | None, str]:
     return min_price, max_price, clean_query
 
 
+# String constants for food typos normalization to avoid duplicate literals
+LAU_STR = "lẩu"
+PHO_STR = "phở"
+PHO_BO_STR = "phở bò"
+PHO_GA_STR = "phở gà"
+BUN_STR = "bún"
+BUN_BO_STR = "bún bò"
+BUN_CHA_STR = "bún chả"
+BUN_DAU_STR = "bún đậu"
+HU_TIEU_STR = "hủ tiếu"
+COM_TAM_STR = "cơm tấm"
+COM_GA_STR = "cơm gà"
+COM_CHIEN_STR = "cơm chiên"
+COM_RANG_STR = "cơm rang"
+COM_NIEU_STR = "cơm niêu"
+BANH_MI_STR = "bánh mì"
+BANH_STR = "bánh"
+BANH_FLAN_STR = "bánh flan"
+CA_PHE_STR = "cà phê"
+BAC_SIU_STR = "bạc sỉu"
+TRA_SUA_STR = "trà sữa"
+TRA_DAO_STR = "trà đào"
+TRA_XANH_STR = "trà xanh"
+SUA_TUOI_STR = "sữa tươi"
+SINH_TO_STR = "sinh tố"
+NUOC_EP_STR = "nước ép"
+CHA_STR = "chả"
+NEM_NUONG_STR = "nem nướng"
+NEM_CHUA_STR = "nem chua"
+TRUNG_CUT_STR = "trứng cút"
+TRUNG_VIT_LON_STR = "trứng vịt lộn"
+HOT_VIT_LON_STR = "hột vịt lộn"
+KHONG_STR = "không"
+DUOC_STR = "được"
+
+
 def normalize_vietnamese_food_typos(text: str) -> str:
-    """Normalize common Vietnamese food typos e.g. lẫu -> lẩu, hủ tếu -> hủ tiếu."""
+    """Normalize common Vietnamese food typos, teencode, and abbreviations."""
     if not text:
         return ""
     text_lower = text.lower()
     typo_map = {
-        r'\blẫu\b': 'lẩu',
-        r'\blễu\b': 'lẩu',
-        r'\bhủ tếu\b': 'hủ tiếu',
-        r'\bhu tieu\b': 'hủ tiếu',
-        r'\bpho bo\b': 'phở bò',
-        r'\bpho ga\b': 'phở gà',
-        r'\bcom tam\b': 'cơm tấm',
-        r'\btra dao\b': 'trà đào',
-        r'\btra sua\b': 'trà sữa',
+        # Lẩu & Phở & Bún & Cơm
+        r'\blẫu\b': LAU_STR,
+        r'\blễu\b': LAU_STR,
+        r'\blau\b': LAU_STR,
+        r'\bphoe\b': PHO_STR,
+        r'\bpho bo\b': PHO_BO_STR,
+        r'\bpho ga\b': PHO_GA_STR,
+        r'\bpho\b': PHO_STR,
+        r'\bbun bo\b': BUN_BO_STR,
+        r'\bbun cha\b': BUN_CHA_STR,
+        r'\bbun dau\b': BUN_DAU_STR,
+        r'\bbun\b': BUN_STR,
+        r'\bhủ tếu\b': HU_TIEU_STR,
+        r'\bhu tieu\b': HU_TIEU_STR,
+        r'\bcom tam\b': COM_TAM_STR,
+        r'\bcom ga\b': COM_GA_STR,
+        r'\bcom chien\b': COM_CHIEN_STR,
+        r'\bcom rang\b': COM_RANG_STR,
+        r'\bcom niêu\b': COM_NIEU_STR,
+        r'\bcom nieu\b': COM_NIEU_STR,
+        
+        # Bánh mì & Bánh
+        r'\bbnh mi\b': BANH_MI_STR,
+        r'\bbm\b': BANH_MI_STR,
+        r'\bbmy\b': BANH_MI_STR,
+        r'\bbanh mi\b': BANH_MI_STR,
+        r'\bbnh\b': BANH_STR,
+        r'\bbanh flan\b': BANH_FLAN_STR,
+        r'\bflan\b': BANH_FLAN_STR,
+        r'\bbánh plan\b': BANH_FLAN_STR,
+        
+        # Đồ uống & Cà phê & Trà
+        r'\bcf\b': CA_PHE_STR,
+        r'\bcfe\b': CA_PHE_STR,
+        r'\bcafe\b': CA_PHE_STR,
+        r'\bca phe\b': CA_PHE_STR,
+        r'\bbac siu\b': BAC_SIU_STR,
+        r'\bbac xiu\b': BAC_SIU_STR,
+        r'\bbạc xỉu\b': BAC_SIU_STR,
+        r'\bts\b': TRA_SUA_STR,
+        r'\btra sua\b': TRA_SUA_STR,
+        r'\btd\b': TRA_DAO_STR,
+        r'\btra dao\b': TRA_DAO_STR,
+        r'\btx\b': TRA_XANH_STR,
+        r'\btra xanh\b': TRA_XANH_STR,
+        r'\bst\b': SUA_TUOI_STR,
+        r'\bsua tuoi\b': SUA_TUOI_STR,
+        r'\bsinh to\b': SINH_TO_STR,
+        r'\bnuoc ep\b': NUOC_EP_STR,
+        
+        # Món ăn kèm / Chả / Nem / Topping
+        r'\bchỏ\b': CHA_STR,
+        r'\bchoả\b': CHA_STR,
+        r'\bnem nuong\b': NEM_NUONG_STR,
+        r'\bnem chua\b': NEM_CHUA_STR,
+        r'\btrung cut\b': TRUNG_CUT_STR,
+        r'\btrung vit lon\b': TRUNG_VIT_LON_STR,
+        r'\bhot vit lon\b': HOT_VIT_LON_STR,
+        
+        # Teencode thông dụng
+        r'\bko\b': KHONG_STR,
+        r'\bk\b': KHONG_STR,
+        r'\bkhomg\b': KHONG_STR,
+        r'\bhông\b': KHONG_STR,
+        r'\bdc\b': DUOC_STR,
+        r'\bđc\b': DUOC_STR,
     }
     for pattern, replacement in typo_map.items():
         text_lower = re.sub(pattern, replacement, text_lower)
@@ -259,11 +352,14 @@ async def search_products(
     max_price: float | None = None,
     limit: int = 3,
     distance_limit: float = 0.65,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
+    max_radius_km: float = 15.0,
 ) -> list[ProductResponse]:
     """
     Hybrid Multi-Tier Search (Exact -> Multi-Token AND LIKE -> Vector pgvector).
     Handles 3-4-5 word exact dish names regardless of word order or punctuation.
-    Supports pre-filtering by CategoryId, BranchId, MinPrice, and MaxPrice.
+    Enforces 15km user location radius filtering (matching Nearby Stores & Hot Deals).
     """
     extracted_min, extracted_max, clean_q = extract_price_info(query)
     final_min_price = min_price if min_price is not None else extracted_min
@@ -275,17 +371,27 @@ async def search_products(
         "món", "đồ ăn", "thực đơn", "các món", "bán", "quán", "đồ uống", "top", "ngon", "bán chạy", "hot", "gợi ý", "nổi tiếng", "top món", "top món ăn", "top món ngon"
     ]
 
+    has_valid_coords = (
+        user_lat is not None
+        and user_lng is not None
+        and -90.0 <= user_lat <= 90.0
+        and -180.0 <= user_lng <= 180.0
+    )
+    effective_lat = user_lat if has_valid_coords else None
+    effective_lng = user_lng if has_valid_coords else None
+
     logger.info(
-        "[search_products] Raw query: '%s' -> Clean query: '%s' | Price range: [%s, %s] | Is Price-Only: %s",
+        "[search_products] Raw query: '%s' -> Clean query: '%s' | Price range: [%s, %s] | Has Location: %s | Max Radius: %s km",
         query,
         search_text,
         final_min_price,
         final_max_price,
-        is_price_only
+        has_valid_coords,
+        max_radius_km
     )
 
     if is_price_only:
-        # Nhánh 1: Truy vấn thuần túy theo giá (Bypass pgvector distance check)
+        # Nhánh 1: Truy vấn thuần túy theo giá với 15km Radius Filter
         sql_str = """
             SELECT m."Id"::text          AS id,
                    m."Name"              AS name,
@@ -300,11 +406,29 @@ async def search_products(
               AND (:category_id IS NULL OR m."CategoryId" = CAST(:category_id AS uuid))
               AND (:branch_id IS NULL OR EXISTS (
                    SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
                    WHERE bmi."MenuItemId" = m."Id" 
                      AND bmi."BranchId" = CAST(:branch_id AS uuid) 
                      AND bmi."IsActive" = true 
                      AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
               ))
+              AND (
+                :branch_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
+                   WHERE bmi."MenuItemId" = m."Id" 
+                     AND bmi."IsActive" = true 
+                     AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
+                )
+              )
             ORDER BY m."BasePrice" ASC
             LIMIT :top_k
         """
@@ -314,16 +438,19 @@ async def search_products(
             "branch_id": branch_id,
             "min_price": final_min_price,
             "max_price": final_max_price,
+            "user_lat": effective_lat,
+            "user_lng": effective_lng,
+            "max_radius_km": max_radius_km,
         }
         try:
             result = await db.execute(text(sql_str), params)
             rows = result.mappings().all()
             return [_row_to_product(dict(r)) for r in rows]
         except Exception as exc:
-            logger.error("search_products Price-Only DB error: %s", exc)
+            logger.exception("search_products Price-Only DB error")
             raise HTTPException(status_code=500, detail="Product search failed.") from exc
 
-    # Nhánh 2: Hybrid Search (Match Exact -> Token LIKE -> pgvector Cosine Search)
+    # Nhánh 2: Hybrid Search với 15km Radius Filter
     vector_literal = await _embed_query(search_text)
     tokens = extract_search_tokens(search_text)
 
@@ -336,6 +463,9 @@ async def search_products(
         "branch_id": branch_id,
         "min_price": final_min_price,
         "max_price": final_max_price,
+        "user_lat": effective_lat,
+        "user_lng": effective_lng,
+        "max_radius_km": max_radius_km,
     }
 
     token_conditions = []
@@ -373,11 +503,29 @@ async def search_products(
               AND (:category_id IS NULL OR m."CategoryId" = CAST(:category_id AS uuid))
               AND (:branch_id IS NULL OR EXISTS (
                    SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
                    WHERE bmi."MenuItemId" = m."Id" 
                      AND bmi."BranchId" = CAST(:branch_id AS uuid) 
                      AND bmi."IsActive" = true 
                      AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
               ))
+              AND (
+                :branch_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM "BranchMenuItems" bmi 
+                   JOIN "Branches" b ON b."Id" = bmi."BranchId"
+                   WHERE bmi."MenuItemId" = m."Id" 
+                     AND bmi."IsActive" = true 
+                     AND bmi."IsSoldOut" = false
+                     AND (
+                       b."Latitude" IS NULL OR b."Longitude" IS NULL OR
+                       (6371 * acos(LEAST(1.0, cos(radians(:user_lat)) * cos(radians(b."Latitude")) * cos(radians(b."Longitude") - radians(:user_lng)) + sin(radians(:user_lat)) * sin(radians(b."Latitude"))))) <= :max_radius_km
+                     )
+                )
+              )
               AND (
                   (m."Embedding" IS NOT NULL AND (m."Embedding" <=> CAST(:vector AS vector)) <= :distance_limit)
                   OR LOWER(m."Name") LIKE :exact_pattern
@@ -396,7 +544,7 @@ async def search_products(
         result = await db.execute(sql, params)
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("search_products DB error: %s", exc)
+        logger.exception("search_products DB error")
         raise HTTPException(status_code=500, detail="Product search failed.") from exc
 
     return [_row_to_product(dict(r)) for r in rows]
@@ -450,7 +598,7 @@ async def get_recommendations(
         )
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("get_recommendations DB error: %s", exc)
+        logger.exception("get_recommendations DB error")
         raise HTTPException(status_code=500, detail="Recommendation lookup failed.") from exc
 
     return [_row_to_product(dict(r)) for r in rows]
@@ -573,7 +721,7 @@ async def get_user_personalized_recommendations(
         )
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("[Personalized Recs] DB Query error: %s", exc)
+        logger.exception("[Personalized Recs] DB Query error")
         raise HTTPException(status_code=500, detail="Personalized recommendation query failed.") from exc
 
     return [

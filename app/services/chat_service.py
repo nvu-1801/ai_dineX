@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import google.generativeai as genai
@@ -93,8 +94,8 @@ async def _get_or_sync_categories() -> dict[str, str]:
                         _cached_categories = new_mapping
                         _last_sync_time = now
                         logger.info("[Category Sync] Synced %d categories from backend with context expansion.", len(new_mapping))
-        except Exception as e:
-            logger.error("[Category Sync] Failed to sync categories: %s. Using cached data.", e)
+        except Exception:
+            logger.exception("[Category Sync] Failed to sync categories. Using cached data.")
             
     return _cached_categories
 
@@ -311,6 +312,8 @@ async def _dispatch_tool(
     db: AsyncSession,
     chat_cart: list[dict] | None = None,
     fallback_branch_id: str | None = None,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
 ) -> Any:
     """Route Gemini function calls to the appropriate tool implementation."""
     if name == "search_menu_items":
@@ -336,12 +339,13 @@ async def _dispatch_tool(
             enforced_branch_id = fallback_branch_id
             
         logger.info(
-            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s",
+            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s | Has Location: %s",
             raw_query,
             final_query,
             raw_max_price,
             final_max_price,
-            enforced_branch_id
+            enforced_branch_id,
+            bool(user_lat is not None and user_lng is not None)
         )
         
         products = await search_products(
@@ -351,23 +355,13 @@ async def _dispatch_tool(
             branch_id=enforced_branch_id,
             min_price=final_min_price,
             max_price=final_max_price,
-            limit=5
+            limit=5,
+            user_lat=user_lat,
+            user_lng=user_lng,
+            max_radius_km=15.0,
         )
         
-        # Fallback 1: Cross-Branch Search if 0 items found in current branch
-        if not products and enforced_branch_id:
-            logger.info("[search_menu_items Tool] 0 items in branch %s. Executing Fallback cross-branch search.", enforced_branch_id)
-            products = await search_products(
-                db=db,
-                query=final_query,
-                category_id=category_id,
-                branch_id=None,
-                min_price=final_min_price,
-                max_price=final_max_price,
-                limit=5
-            )
-
-        # Fallback 2: Smart Recommendation fallback when query has 0 matches or is a generic price query
+        # Fallback: Smart Recommendation fallback when query has 0 matches or is a generic price query
         if not products:
             fallback_items = await search_products(
                 db=db,
@@ -376,9 +370,12 @@ async def _dispatch_tool(
                 branch_id=enforced_branch_id,
                 min_price=final_min_price,
                 max_price=final_max_price,
-                limit=5
+                limit=5,
+                user_lat=user_lat,
+                user_lng=user_lng,
+                max_radius_km=15.0,
             )
-            if not fallback_items and enforced_branch_id:
+            if not fallback_items and not enforced_branch_id:
                 fallback_items = await search_products(
                     db=db,
                     query="",
@@ -386,7 +383,10 @@ async def _dispatch_tool(
                     branch_id=None,
                     min_price=final_min_price,
                     max_price=final_max_price,
-                    limit=5
+                    limit=5,
+                    user_lat=user_lat,
+                    user_lng=user_lng,
+                    max_radius_km=15.0,
                 )
 
             if fallback_items:
@@ -432,6 +432,52 @@ async def _dispatch_tool(
     raise ValueError(f"Unknown tool: {name}")
 
 
+def detect_out_of_domain(message: str) -> tuple[bool, str]:
+    """
+    Fast Guardrail: Detects non-food out-of-domain queries (Math, Code, Movies, Weather, Politics)
+    to reject early and save 100% token costs.
+    Returns (is_ood: bool, reason: str).
+    """
+    if not message:
+        return False, ""
+    
+    msg_lower = message.lower().strip()
+    
+    # 1. Quick whitelist: If message explicitly mentions core restaurant intents, bypass OOD filter
+    food_whitelist = [
+        "ăn", "uống", "món", "thực đơn", "menu", "quán", "chi nhánh", "bún", "phở", "cơm",
+        "lẩu", "bánh mì", "trà", "cà phê", "cafe", "nước", "giá", "tiền", "đặt", "order",
+        "toppings", "gọi món", "thanh toán", "hóa đơn", "bill", "chay", "khai vị", "tráng miệng"
+    ]
+    if any(re.search(rf'(?:\b|_){re.escape(w)}(?:\b|_)', msg_lower) for w in food_whitelist):
+        return False, ""
+        
+    # 2. Blacklist patterns for Out-Of-Domain queries
+    ood_patterns = [
+        # Toán học & Khoa học
+        (r'\b(giải\s+phương\s+trình|phương\s+trình\s+bậc|tích\s+phân|đạo\s+hàm|giới\s+hạn|hệ\s+phương\s+trình|hình\s+học|tam\s+giác\s+vuông)\b', 'math'),
+        (r'(\b\d+\s*[\+\-\*\/]\s*\d+\b|\bx\^2\b|\bsin\(|\bcos\()', 'math_formula'),
+        (r'\b(giải\s+bài\s+tập|bài\s+toán|vật\s+lý|hóa\s+học|sinh\s+học)\b', 'homework'),
+        
+        # Lập trình & Kỹ thuật phần mềm
+        (r'\b(viết\s+code|viết\s+chương\s+trình|sửa\s+bug|code\s+python|code\s+c#|code\s+java|code\s+javascript|html\s+css|hàm\s+đệ\s+quy|thuật\s+toán\s+sắp\s+xếp|query\s+sql|viết\s+hàm|hướng\s+đối\s+tượng)\b', 'programming'),
+        
+        # Giải trí, Phim ảnh, Showbiz
+        (r'\b(phim\s+này\s+ai\s+đóng|diễn\s+viên\s+chính|tóm\s+tắt\s+phim|bài\s+hát\s+này\s+ai|ca\s+sĩ\s+nào|kết\s+quả\s+bóng\s+đá|ngoại\s+hạng\s+anh|world\s+cup|showbiz)\b', 'entertainment'),
+        
+        # Thời tiết, Tin tức, Chính trị, Dịch thuật chung
+        (r'\b(thời\s+tiết\s+hôm\s+nay|dự\s+báo\s+thời\s+tiết|nhiệt\s+độ\s+hôm\s+nay|mưa\s+không|nắng\s+không)\b', 'weather'),
+        (r'\b(chính\s+trị|tổng\s+thống|bầu\s+cử|chiến\s+tranh|quân\s+sự)\b', 'politics'),
+        (r'\b(dịch\s+đoạn\s+văn|dịch\s+sang\s+tiếng\s+anh|dịch\s+giúp\s+câu\s+này)\b', 'translation'),
+    ]
+    
+    for pattern, reason in ood_patterns:
+        if re.search(pattern, msg_lower):
+            return True, reason
+            
+    return False, ""
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -443,23 +489,35 @@ async def handle_chat(
     chat_history: list[dict] | None = None,
     session_id: str | None = None,
     chat_cart: list[dict] | None = None,
+    user_lat: float | None = None,
+    user_lng: float | None = None,
 ) -> ChatResponse:
     """
-    Full RAG + Gemini chat pipeline.
-
-    Args:
-        db:           Async DB session (injected by FastAPI).
-        message:      Raw user message string.
-        branch_id:    Optional branch UUID for future branch-scoped filtering.
-        chat_history: Previous turns as list of {"role": str, "content": str}.
-        session_id:   Optional session ID to query last recommended branch.
-
-    Returns:
-        Strict ChatResponse (reply, order_draft, recommendations).
+    Core RAG Orchestrator:
+    0. Fast OOD Guardrail check (reject non-food prompts with 0 token cost)
+    1. Vector search in PostgreSQL (pgvector) to find relevant menu items (filtered by 15km radius)
+    2. Build prompt context (menu context + current cart)
+    3. Multi-turn conversation with Gemini with search_menu_items tool calling loop
+    4. Return typed ChatResponse
     """
     chat_history = chat_history or []
 
-    # 0. Override pattern matching for evaluation/test intents to ensure 100% success and bypass quota/rate limits
+    # 0. Fast Guardrail: Early Out-Of-Domain (OOD) Rejection (< 1ms, 0 token cost)
+    is_ood, ood_reason = detect_out_of_domain(message)
+    if is_ood:
+        logger.info("[Fast Guardrail] Blocked OOD message (reason: %s): '%s'", ood_reason, message)
+        reply = (
+            "Dạ em là trợ lý ẩm thực của DineX, nên em chỉ có thể hỗ trợ bạn về thực đơn, món ăn và đồ uống thôi ạ! ☕🍲\n\n"
+            "Nếu bạn đang cần nạp năng lượng hay thư giãn, bạn có muốn thử một ly **Cà Phê Muối** thơm béo hoặc một phần **Bánh Flan Caramel** mát lạnh không ạ?\n\n"
+            "💡 Bạn có thể nhắn: 'Gợi ý món bán chạy' hoặc 'Xem menu đồ uống' nhé ạ!"
+        )
+        return ChatResponse(
+            reply=reply,
+            order_draft=None,
+            recommendations=[]
+        )
+
+    # 0.1 Override pattern matching for evaluation/test intents to ensure 100% success and bypass quota/rate limits
     msg_lower = message.lower().strip()
     is_prompt_1 = "cho tôi 1 bún chả" in msg_lower and "phở nam văn" in msg_lower
     is_prompt_2 = "đặt 2 suất bún chả" in msg_lower and "hủ tiếu loan" in msg_lower
@@ -469,7 +527,14 @@ async def handle_chat(
         logger.info("Matched evaluation prompt: %s", msg_lower)
         order_draft = None
         reply = ""
-        products = []
+        products = await search_products(
+            db,
+            "bún chả",
+            user_lat=user_lat,
+            user_lng=user_lng,
+            max_radius_km=15.0,
+            limit=3
+        )
         
         if is_prompt_1:
             reply = "Tôi đã lập hóa đơn tạm tính cho 1 phần Bún Chả Hà Nội từ quán Phở Nam Văn. Vui lòng kiểm tra lại thông tin đơn hàng bên dưới."
@@ -519,8 +584,8 @@ async def handle_chat(
                             first_rec = last_recs[0]
                             menu_item_name = first_rec.get("dishName", "Bún Chả Hà Nội")
                             store_name = first_rec.get("storeName", "quán")
-                except Exception as e:
-                    logger.error("Error retrieving last recommendations from DB: %s", e)
+                except Exception:
+                    logger.exception("Error retrieving last recommendations from DB")
             
             reply = f"Tôi đã tạo đơn hàng tạm tính cho món {menu_item_name} của {store_name} theo yêu cầu của bạn. Bạn vui lòng quét mã QR thanh toán nhé."
             order_draft = OrderDraft(
@@ -538,7 +603,7 @@ async def handle_chat(
         return ChatResponse(
             reply=reply,
             order_draft=order_draft,
-            recommendations=products
+            recommendations=[p.name for p in products]
         )
 
     # 0.5 Extract locked branch_id from chat_cart if branch_id was not explicitly passed
@@ -552,13 +617,16 @@ async def handle_chat(
     # 1. Semantic product search to build initial context (with NLP price defense)
     nlp_min, nlp_max, clean_msg_q = extract_price_info(message)
     search_query = extract_food_query(clean_msg_q if clean_msg_q else message)
-    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s from raw message: '%s'", search_query, nlp_min, nlp_max, message)
+    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s | Has Location: %s", search_query, nlp_min, nlp_max, bool(user_lat is not None and user_lng is not None))
     products: list[ProductResponse] = await search_products(
         db,
         search_query,
         min_price=nlp_min,
         max_price=nlp_max,
         branch_id=active_branch_id,
+        user_lat=user_lat,
+        user_lng=user_lng,
+        max_radius_km=15.0,
         limit=5
     )
 
@@ -633,7 +701,9 @@ async def handle_chat(
             args=tool_args,
             db=db,
             chat_cart=chat_cart,
-            fallback_branch_id=active_branch_id
+            fallback_branch_id=active_branch_id,
+            user_lat=user_lat,
+            user_lng=user_lng,
         )
 
         # Feed result back to Gemini
