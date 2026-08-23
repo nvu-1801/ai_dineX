@@ -8,12 +8,15 @@ load_dotenv()
 
 import logging
 
+import asyncio
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers.ai import router as ai_router
+from app.services.ingest_service import auto_ingestion_worker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,10 +24,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Run auto-ingestion worker in the background (runs on startup + every 48h)
+    worker_task = asyncio.create_task(auto_ingestion_worker())
+    yield
+    # Shutdown: Cancel background worker gracefully
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
+
 app = FastAPI(
     title="DineX RAG AI Service",
     description="FastAPI microservice — Gemini RAG pipeline with pgvector + GraphRAG. Sits behind .NET 10 API Gateway.",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------

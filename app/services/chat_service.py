@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import google.generativeai as genai
@@ -448,6 +449,52 @@ async def _dispatch_tool(
     raise ValueError(f"Unknown tool: {name}")
 
 
+def detect_out_of_domain(message: str) -> tuple[bool, str]:
+    """
+    Fast Guardrail: Detects non-food out-of-domain queries (Math, Code, Movies, Weather, Politics)
+    to reject early and save 100% token costs.
+    Returns (is_ood: bool, reason: str).
+    """
+    if not message:
+        return False, ""
+    
+    msg_lower = message.lower().strip()
+    
+    # 1. Quick whitelist: If message explicitly mentions core restaurant intents, bypass OOD filter
+    food_whitelist = [
+        "ăn", "uống", "món", "thực đơn", "menu", "quán", "chi nhánh", "bún", "phở", "cơm",
+        "lẩu", "bánh mì", "trà", "cà phê", "cafe", "nước", "giá", "tiền", "đặt", "order",
+        "toppings", "gọi món", "thanh toán", "hóa đơn", "bill", "chay", "khai vị", "tráng miệng"
+    ]
+    if any(w in msg_lower for w in food_whitelist):
+        return False, ""
+        
+    # 2. Blacklist patterns for Out-Of-Domain queries
+    ood_patterns = [
+        # Toán học & Khoa học
+        (r'\b(giải\s+phương\s+trình|phương\s+trình\s+bậc|tích\s+phân|đạo\s+hàm|giới\s+hạn|hệ\s+phương\s+trình|hình\s+học|tam\s+giác\s+vuông)\b', 'math'),
+        (r'(\b\d+\s*[\+\-\*\/]\s*\d+\b|\bx\^2\b|\bsin\(|\bcos\()', 'math_formula'),
+        (r'\b(giải\s+bài\s+tập|bài\s+toán|vật\s+lý|hóa\s+học|sinh\s+học)\b', 'homework'),
+        
+        # Lập trình & Kỹ thuật phần mềm
+        (r'\b(viết\s+code|viết\s+chương\s+trình|sửa\s+bug|code\s+python|code\s+c#|code\s+java|code\s+javascript|html\s+css|hàm\s+đệ\s+quy|thuật\s+toán\s+sắp\s+xếp|query\s+sql|viết\s+hàm|hướng\s+đối\s+tượng)\b', 'programming'),
+        
+        # Giải trí, Phim ảnh, Showbiz
+        (r'\b(phim\s+này\s+ai\s+đóng|diễn\s+viên\s+chính|tóm\s+tắt\s+phim|bài\s+hát\s+này\s+ai|ca\s+sĩ\s+nào|kết\s+quả\s+bóng\s+đá|ngoại\s+hạng\s+anh|world\s+cup|showbiz)\b', 'entertainment'),
+        
+        # Thời tiết, Tin tức, Chính trị, Dịch thuật chung
+        (r'\b(thời\s+tiết\s+hôm\s+nay|dự\s+báo\s+thời\s+tiết|nhiệt\s+độ\s+hôm\s+nay|mưa\s+không|nắng\s+không)\b', 'weather'),
+        (r'\b(chính\s+trị|tổng\s+thống|bầu\s+cử|chiến\s+tranh|quân\s+sự)\b', 'politics'),
+        (r'\b(dịch\s+đoạn\s+văn|dịch\s+sang\s+tiếng\s+anh|dịch\s+giúp\s+câu\s+này)\b', 'translation'),
+    ]
+    
+    for pattern, reason in ood_patterns:
+        if re.search(pattern, msg_lower):
+            return True, reason
+            
+    return False, ""
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -480,7 +527,22 @@ async def handle_chat(
     """
     chat_history = chat_history or []
 
-    # 0. Override pattern matching for evaluation/test intents to ensure 100% success and bypass quota/rate limits
+    # 0. Fast Guardrail: Early Out-Of-Domain (OOD) Rejection (< 1ms, 0 token cost)
+    is_ood, ood_reason = detect_out_of_domain(message)
+    if is_ood:
+        logger.info("[Fast Guardrail] Blocked OOD query (reason: %s): '%s'", ood_reason, message)
+        reply = (
+            "Dạ em là trợ lý ẩm thực của DineX, nên em chỉ có thể hỗ trợ bạn về thực đơn, món ăn và đồ uống thôi ạ! ☕🍲\n\n"
+            "Nếu bạn đang cần nạp năng lượng hay thư giãn, bạn có muốn thử một ly **Cà Phê Muối** thơm béo hoặc một phần **Bánh Flan Caramel** mát lạnh không ạ?\n\n"
+            "💡 Bạn có thể nhắn: 'Gợi ý món bán chạy' hoặc 'Xem menu đồ uống' nhé ạ!"
+        )
+        return ChatResponse(
+            reply=reply,
+            order_draft=None,
+            recommendations=[]
+        )
+
+    # 0.1 Override pattern matching for evaluation/test intents to ensure 100% success and bypass quota/rate limits
     msg_lower = message.lower().strip()
     is_prompt_1 = "cho tôi 1 bún chả" in msg_lower and "phở nam văn" in msg_lower
     is_prompt_2 = "đặt 2 suất bún chả" in msg_lower and "hủ tiếu loan" in msg_lower

@@ -21,7 +21,7 @@ from app.schemas import ProductResponse
 
 logger = logging.getLogger("rag_service")
 
-_EMBED_MODEL = "models/text-embedding-004"
+_EMBED_MODEL = "models/gemini-embedding-001"
 
 import os
 
@@ -149,20 +149,77 @@ def extract_price_info(text: str) -> tuple[float | None, float | None, str]:
 
 
 def normalize_vietnamese_food_typos(text: str) -> str:
-    """Normalize common Vietnamese food typos e.g. lẫu -> lẩu, hủ tếu -> hủ tiếu."""
+    """Normalize common Vietnamese food typos, teencode, and abbreviations."""
     if not text:
         return ""
     text_lower = text.lower()
     typo_map = {
+        # Lẩu & Phở & Bún & Cơm
         r'\blẫu\b': 'lẩu',
         r'\blễu\b': 'lẩu',
-        r'\bhủ tếu\b': 'hủ tiếu',
-        r'\bhu tieu\b': 'hủ tiếu',
+        r'\blau\b': 'lẩu',
+        r'\bphoe\b': 'phở',
         r'\bpho bo\b': 'phở bò',
         r'\bpho ga\b': 'phở gà',
+        r'\bpho\b': 'phở',
+        r'\bbun bo\b': 'bún bò',
+        r'\bbun cha\b': 'bún chả',
+        r'\bbun dau\b': 'bún đậu',
+        r'\bbun\b': 'bún',
+        r'\bhủ tếu\b': 'hủ tiếu',
+        r'\bhu tieu\b': 'hủ tiếu',
         r'\bcom tam\b': 'cơm tấm',
-        r'\btra dao\b': 'trà đào',
+        r'\bcom ga\b': 'cơm gà',
+        r'\bcom chien\b': 'cơm chiên',
+        r'\bcom rang\b': 'cơm rang',
+        r'\bcom niêu\b': 'cơm niêu',
+        r'\bcom nieu\b': 'cơm niêu',
+        
+        # Bánh mì & Bánh
+        r'\bbnh mi\b': 'bánh mì',
+        r'\bbm\b': 'bánh mì',
+        r'\bbmy\b': 'bánh mì',
+        r'\bbanh mi\b': 'bánh mì',
+        r'\bbnh\b': 'bánh',
+        r'\bbanh flan\b': 'bánh flan',
+        r'\bflan\b': 'bánh flan',
+        r'\bbánh plan\b': 'bánh flan',
+        
+        # Đồ uống & Cà phê & Trà
+        r'\bcf\b': 'cà phê',
+        r'\bcfe\b': 'cà phê',
+        r'\bcafe\b': 'cà phê',
+        r'\bca phe\b': 'cà phê',
+        r'\bbac siu\b': 'bạc sỉu',
+        r'\bbac xiu\b': 'bạc sỉu',
+        r'\bbạc xỉu\b': 'bạc sỉu',
+        r'\bts\b': 'trà sữa',
         r'\btra sua\b': 'trà sữa',
+        r'\btd\b': 'trà đào',
+        r'\btra dao\b': 'trà đào',
+        r'\btx\b': 'trà xanh',
+        r'\btra xanh\b': 'trà xanh',
+        r'\bst\b': 'sữa tươi',
+        r'\bsua tuoi\b': 'sữa tươi',
+        r'\bsinh to\b': 'sinh tố',
+        r'\bnuoc ep\b': 'nước ép',
+        
+        # Món ăn kèm / Chả / Nem / Topping
+        r'\bchỏ\b': 'chả',
+        r'\bchoả\b': 'chả',
+        r'\bnem nuong\b': 'nem nướng',
+        r'\bnem chua\b': 'nem chua',
+        r'\btrung cut\b': 'trứng cút',
+        r'\btrung vit lon\b': 'trứng vịt lộn',
+        r'\bhot vit lon\b': 'hột vịt lộn',
+        
+        # Teencode thông dụng
+        r'\bko\b': 'không',
+        r'\bk\b': 'không',
+        r'\bkhomg\b': 'không',
+        r'\bhông\b': 'không',
+        r'\bdc\b': 'được',
+        r'\bđc\b': 'được',
     }
     for pattern, replacement in typo_map.items():
         text_lower = re.sub(pattern, replacement, text_lower)

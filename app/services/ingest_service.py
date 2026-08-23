@@ -17,7 +17,7 @@ from app.config import settings
 logger = logging.getLogger("ingest_service")
 
 # Gemini embedding model
-_EMBED_MODEL = "models/text-embedding-004"
+_EMBED_MODEL = "models/gemini-embedding-001"
 _BATCH_SIZE = 50  # stay within Gemini batch limits
 
 # Configure Gemini once at module load
@@ -93,3 +93,37 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
         logger.info("Committed batch — cumulative processed: %d", processed)
 
     return processed
+
+
+import asyncio
+from app.database import AsyncSessionLocal
+
+
+async def auto_ingestion_worker():
+    """
+    Background worker:
+    1. Runs immediately on application startup to ingest any missing embeddings.
+    2. Repeats periodically every 48 hours (2 days).
+    """
+    CHECK_INTERVAL_SECONDS = 48 * 60 * 60  # 48 hours
+
+    logger.info("[Auto-Ingestion Worker] Initialized. Starting startup scan...")
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                count = await ingest_menu_embeddings(session)
+                if count > 0:
+                    logger.info("[Auto-Ingestion Worker] Successfully generated embeddings for %d new items.", count)
+                else:
+                    logger.info("[Auto-Ingestion Worker] Menu vector database is up-to-date (0 items pending).")
+        except Exception as e:
+            logger.error("[Auto-Ingestion Worker] Error during scheduled ingest: %s", e)
+
+        logger.info("[Auto-Ingestion Worker] Sleeping for %d hours until next scan...", CHECK_INTERVAL_SECONDS // 3600)
+        try:
+            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            logger.info("[Auto-Ingestion Worker] Worker task cancelled. Shutting down gracefully.")
+            break
+
