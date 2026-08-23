@@ -55,7 +55,7 @@ async def _embed_query(query: str) -> str:
         vector: list[float] = response["embedding"]
         return "[" + ",".join(map(str, vector)) + "]"
     except Exception as exc:
-        logger.error("[RAG Service] Lỗi khi tạo embedding: %s", exc)
+        logger.exception("[RAG Service] Lỗi khi tạo embedding")
         raise HTTPException(status_code=502, detail=f"Embedding generation failed: {exc}") from exc
 
 
@@ -148,6 +148,42 @@ def extract_price_info(text: str) -> tuple[float | None, float | None, str]:
     return min_price, max_price, clean_query
 
 
+# String constants for food typos normalization to avoid duplicate literals
+LAU_STR = "lẩu"
+PHO_STR = "phở"
+PHO_BO_STR = "phở bò"
+PHO_GA_STR = "phở gà"
+BUN_STR = "bún"
+BUN_BO_STR = "bún bò"
+BUN_CHA_STR = "bún chả"
+BUN_DAU_STR = "bún đậu"
+HU_TIEU_STR = "hủ tiếu"
+COM_TAM_STR = "cơm tấm"
+COM_GA_STR = "cơm gà"
+COM_CHIEN_STR = "cơm chiên"
+COM_RANG_STR = "cơm rang"
+COM_NIEU_STR = "cơm niêu"
+BANH_MI_STR = "bánh mì"
+BANH_STR = "bánh"
+BANH_FLAN_STR = "bánh flan"
+CA_PHE_STR = "cà phê"
+BAC_SIU_STR = "bạc sỉu"
+TRA_SUA_STR = "trà sữa"
+TRA_DAO_STR = "trà đào"
+TRA_XANH_STR = "trà xanh"
+SUA_TUOI_STR = "sữa tươi"
+SINH_TO_STR = "sinh tố"
+NUOC_EP_STR = "nước ép"
+CHA_STR = "chả"
+NEM_NUONG_STR = "nem nướng"
+NEM_CHUA_STR = "nem chua"
+TRUNG_CUT_STR = "trứng cút"
+TRUNG_VIT_LON_STR = "trứng vịt lộn"
+HOT_VIT_LON_STR = "hột vịt lộn"
+KHONG_STR = "không"
+DUOC_STR = "được"
+
+
 def normalize_vietnamese_food_typos(text: str) -> str:
     """Normalize common Vietnamese food typos, teencode, and abbreviations."""
     if not text:
@@ -155,71 +191,71 @@ def normalize_vietnamese_food_typos(text: str) -> str:
     text_lower = text.lower()
     typo_map = {
         # Lẩu & Phở & Bún & Cơm
-        r'\blẫu\b': 'lẩu',
-        r'\blễu\b': 'lẩu',
-        r'\blau\b': 'lẩu',
-        r'\bphoe\b': 'phở',
-        r'\bpho bo\b': 'phở bò',
-        r'\bpho ga\b': 'phở gà',
-        r'\bpho\b': 'phở',
-        r'\bbun bo\b': 'bún bò',
-        r'\bbun cha\b': 'bún chả',
-        r'\bbun dau\b': 'bún đậu',
-        r'\bbun\b': 'bún',
-        r'\bhủ tếu\b': 'hủ tiếu',
-        r'\bhu tieu\b': 'hủ tiếu',
-        r'\bcom tam\b': 'cơm tấm',
-        r'\bcom ga\b': 'cơm gà',
-        r'\bcom chien\b': 'cơm chiên',
-        r'\bcom rang\b': 'cơm rang',
-        r'\bcom niêu\b': 'cơm niêu',
-        r'\bcom nieu\b': 'cơm niêu',
+        r'\blẫu\b': LAU_STR,
+        r'\blễu\b': LAU_STR,
+        r'\blau\b': LAU_STR,
+        r'\bphoe\b': PHO_STR,
+        r'\bpho bo\b': PHO_BO_STR,
+        r'\bpho ga\b': PHO_GA_STR,
+        r'\bpho\b': PHO_STR,
+        r'\bbun bo\b': BUN_BO_STR,
+        r'\bbun cha\b': BUN_CHA_STR,
+        r'\bbun dau\b': BUN_DAU_STR,
+        r'\bbun\b': BUN_STR,
+        r'\bhủ tếu\b': HU_TIEU_STR,
+        r'\bhu tieu\b': HU_TIEU_STR,
+        r'\bcom tam\b': COM_TAM_STR,
+        r'\bcom ga\b': COM_GA_STR,
+        r'\bcom chien\b': COM_CHIEN_STR,
+        r'\bcom rang\b': COM_RANG_STR,
+        r'\bcom niêu\b': COM_NIEU_STR,
+        r'\bcom nieu\b': COM_NIEU_STR,
         
         # Bánh mì & Bánh
-        r'\bbnh mi\b': 'bánh mì',
-        r'\bbm\b': 'bánh mì',
-        r'\bbmy\b': 'bánh mì',
-        r'\bbanh mi\b': 'bánh mì',
-        r'\bbnh\b': 'bánh',
-        r'\bbanh flan\b': 'bánh flan',
-        r'\bflan\b': 'bánh flan',
-        r'\bbánh plan\b': 'bánh flan',
+        r'\bbnh mi\b': BANH_MI_STR,
+        r'\bbm\b': BANH_MI_STR,
+        r'\bbmy\b': BANH_MI_STR,
+        r'\bbanh mi\b': BANH_MI_STR,
+        r'\bbnh\b': BANH_STR,
+        r'\bbanh flan\b': BANH_FLAN_STR,
+        r'\bflan\b': BANH_FLAN_STR,
+        r'\bbánh plan\b': BANH_FLAN_STR,
         
         # Đồ uống & Cà phê & Trà
-        r'\bcf\b': 'cà phê',
-        r'\bcfe\b': 'cà phê',
-        r'\bcafe\b': 'cà phê',
-        r'\bca phe\b': 'cà phê',
-        r'\bbac siu\b': 'bạc sỉu',
-        r'\bbac xiu\b': 'bạc sỉu',
-        r'\bbạc xỉu\b': 'bạc sỉu',
-        r'\bts\b': 'trà sữa',
-        r'\btra sua\b': 'trà sữa',
-        r'\btd\b': 'trà đào',
-        r'\btra dao\b': 'trà đào',
-        r'\btx\b': 'trà xanh',
-        r'\btra xanh\b': 'trà xanh',
-        r'\bst\b': 'sữa tươi',
-        r'\bsua tuoi\b': 'sữa tươi',
-        r'\bsinh to\b': 'sinh tố',
-        r'\bnuoc ep\b': 'nước ép',
+        r'\bcf\b': CA_PHE_STR,
+        r'\bcfe\b': CA_PHE_STR,
+        r'\bcafe\b': CA_PHE_STR,
+        r'\bca phe\b': CA_PHE_STR,
+        r'\bbac siu\b': BAC_SIU_STR,
+        r'\bbac xiu\b': BAC_SIU_STR,
+        r'\bbạc xỉu\b': BAC_SIU_STR,
+        r'\bts\b': TRA_SUA_STR,
+        r'\btra sua\b': TRA_SUA_STR,
+        r'\btd\b': TRA_DAO_STR,
+        r'\btra dao\b': TRA_DAO_STR,
+        r'\btx\b': TRA_XANH_STR,
+        r'\btra xanh\b': TRA_XANH_STR,
+        r'\bst\b': SUA_TUOI_STR,
+        r'\bsua tuoi\b': SUA_TUOI_STR,
+        r'\bsinh to\b': SINH_TO_STR,
+        r'\bnuoc ep\b': NUOC_EP_STR,
         
         # Món ăn kèm / Chả / Nem / Topping
-        r'\bchỏ\b': 'chả',
-        r'\bchoả\b': 'chả',
-        r'\bnem nuong\b': 'nem nướng',
-        r'\bnem chua\b': 'nem chua',
-        r'\btrung cut\b': 'trứng cút',
-        r'\btrung vit lon\b': 'trứng vịt lộn',
-        r'\bhot vit lon\b': 'hột vịt lộn',
+        r'\bchỏ\b': CHA_STR,
+        r'\bchoả\b': CHA_STR,
+        r'\bnem nuong\b': NEM_NUONG_STR,
+        r'\bnem chua\b': NEM_CHUA_STR,
+        r'\btrung cut\b': TRUNG_CUT_STR,
+        r'\btrung vit lon\b': TRUNG_VIT_LON_STR,
+        r'\bhot vit lon\b': HOT_VIT_LON_STR,
         
         # Teencode thông dụng
-        r'\bko\b': 'không',
-        r'\bk\b': 'không',
-        r'\bkhomg\b': 'không',
-        r'\bhông\b': 'không',
-        r'\bdc\b': 'được',
-        r'\bđc\b': 'được',
+        r'\bko\b': KHONG_STR,
+        r'\bk\b': KHONG_STR,
+        r'\bkhomg\b': KHONG_STR,
+        r'\bhông\b': KHONG_STR,
+        r'\bdc\b': DUOC_STR,
+        r'\bđc\b': DUOC_STR,
     }
     for pattern, replacement in typo_map.items():
         text_lower = re.sub(pattern, replacement, text_lower)
@@ -406,7 +442,7 @@ async def search_products(
             rows = result.mappings().all()
             return [_row_to_product(dict(r)) for r in rows]
         except Exception as exc:
-            logger.error("search_products Price-Only DB error: %s", exc)
+            logger.exception("search_products Price-Only DB error")
             raise HTTPException(status_code=500, detail="Product search failed.") from exc
 
     # Nhánh 2: Hybrid Search với 15km Radius Filter
@@ -503,7 +539,7 @@ async def search_products(
         result = await db.execute(sql, params)
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("search_products DB error: %s", exc)
+        logger.exception("search_products DB error")
         raise HTTPException(status_code=500, detail="Product search failed.") from exc
 
     return [_row_to_product(dict(r)) for r in rows]
@@ -557,7 +593,7 @@ async def get_recommendations(
         )
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("get_recommendations DB error: %s", exc)
+        logger.exception("get_recommendations DB error")
         raise HTTPException(status_code=500, detail="Recommendation lookup failed.") from exc
 
     return [_row_to_product(dict(r)) for r in rows]
@@ -680,7 +716,7 @@ async def get_user_personalized_recommendations(
         )
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("[Personalized Recs] DB Query error: %s", exc)
+        logger.exception("[Personalized Recs] DB Query error")
         raise HTTPException(status_code=500, detail="Personalized recommendation query failed.") from exc
 
     return [

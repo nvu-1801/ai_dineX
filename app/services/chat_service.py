@@ -94,8 +94,8 @@ async def _get_or_sync_categories() -> dict[str, str]:
                         _cached_categories = new_mapping
                         _last_sync_time = now
                         logger.info("[Category Sync] Synced %d categories from backend with context expansion.", len(new_mapping))
-        except Exception as e:
-            logger.error("[Category Sync] Failed to sync categories: %s. Using cached data.", e)
+        except Exception:
+            logger.exception("[Category Sync] Failed to sync categories. Using cached data.")
             
     return _cached_categories
 
@@ -609,8 +609,8 @@ async def handle_chat(
                             first_rec = last_recs[0]
                             menu_item_name = first_rec.get("dishName", "Bún Chả Hà Nội")
                             store_name = first_rec.get("storeName", "quán")
-                except Exception as e:
-                    logger.error("Error retrieving last recommendations from DB: %s", e)
+                except Exception:
+                    logger.exception("Error retrieving last recommendations from DB")
             
             reply = f"Tôi đã tạo đơn hàng tạm tính cho món {menu_item_name} của {store_name} theo yêu cầu của bạn. Bạn vui lòng quét mã QR thanh toán nhé."
             order_draft = OrderDraft(

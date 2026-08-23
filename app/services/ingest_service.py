@@ -72,8 +72,8 @@ async def ingest_menu_embeddings(db: AsyncSession) -> int:
         try:
             response = await call_llm_api_with_fallback(_embed_batch)
             embeddings: list[list[float]] = response["embedding"]
-        except Exception as exc:
-            logger.error("Gemini embedding error on batch starting %d: %s", batch_start, exc)
+        except Exception:
+            logger.exception("Gemini embedding error on batch starting %d", batch_start)
             raise
 
         # 3. Bulk-update each row — pgvector accepts cast from text literal
@@ -117,13 +117,13 @@ async def auto_ingestion_worker():
                     logger.info("[Auto-Ingestion Worker] Successfully generated embeddings for %d new items.", count)
                 else:
                     logger.info("[Auto-Ingestion Worker] Menu vector database is up-to-date (0 items pending).")
-        except Exception as e:
-            logger.error("[Auto-Ingestion Worker] Error during scheduled ingest: %s", e)
+        except Exception:
+            logger.exception("[Auto-Ingestion Worker] Error during scheduled ingest")
 
         logger.info("[Auto-Ingestion Worker] Sleeping for %d hours until next scan...", CHECK_INTERVAL_SECONDS // 3600)
         try:
             await asyncio.sleep(CHECK_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             logger.info("[Auto-Ingestion Worker] Worker task cancelled. Shutting down gracefully.")
-            break
+            raise
 
