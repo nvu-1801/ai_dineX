@@ -371,8 +371,14 @@ async def search_products(
         "món", "đồ ăn", "thực đơn", "các món", "bán", "quán", "đồ uống", "top", "ngon", "bán chạy", "hot", "gợi ý", "nổi tiếng", "top món", "top món ăn", "top món ngon"
     ]
 
-    effective_lat = user_lat
-    effective_lng = user_lng
+    has_valid_coords = (
+        user_lat is not None
+        and user_lng is not None
+        and -90.0 <= user_lat <= 90.0
+        and -180.0 <= user_lng <= 180.0
+    )
+    effective_lat = user_lat if has_valid_coords else None
+    effective_lng = user_lng if has_valid_coords else None
 
     logger.info(
         "[search_products] Raw query: '%s' -> Clean query: '%s' | Price range: [%s, %s] | Has Location: %s | Max Radius: %s km",
@@ -380,7 +386,7 @@ async def search_products(
         search_text,
         final_min_price,
         final_max_price,
-        bool(user_lat is not None and user_lng is not None),
+        has_valid_coords,
         max_radius_km
     )
 

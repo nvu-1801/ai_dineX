@@ -24,21 +24,22 @@ _BATCH_SIZE = 50  # stay within Gemini batch limits
 from app.services.key_manager import call_llm_api_with_fallback
 
 
-async def ingest_menu_embeddings(db: AsyncSession) -> int:
+async def ingest_menu_embeddings(db: AsyncSession, force_reembed: bool = False) -> int:
     """
-    Embed all MenuItems where Embedding IS NULL.
+    Embed all MenuItems where Embedding IS NULL (or all items if force_reembed=True).
 
     Returns:
         Number of rows updated.
     """
     # 1. Fetch items that need embeddings
+    where_clause = "" if force_reembed else 'WHERE "Embedding" IS NULL'
     fetch_sql = text(
-        """
+        f"""
         SELECT "Id"::text AS id,
                "Name"       AS name,
                "Description" AS description
         FROM   "MenuItems"
-        WHERE  "Embedding" IS NULL
+        {where_clause}
         LIMIT  1000
         """
     )

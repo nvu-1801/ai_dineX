@@ -117,14 +117,15 @@ async def chat_endpoint(
 
 @router.post("/ingest", response_model=IngestResponse, summary="Ingest MenuItems embeddings")
 async def ingest_endpoint(
+    force_reembed: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> IngestResponse:
     """
-    Queries all MenuItems with NULL Embedding, generates vectors via Gemini,
-    and bulk-upserts them into the pgvector column.
+    Queries all MenuItems with NULL Embedding (or all items if force_reembed is True),
+    generates vectors via Gemini gemini-embedding-001, and bulk-upserts them into the pgvector column.
     """
     try:
-        processed_count = await ingest_menu_embeddings(db)
+        processed_count = await ingest_menu_embeddings(db, force_reembed=force_reembed)
         return IngestResponse(status="success", processed_count=processed_count)
     except HTTPException:
         raise
