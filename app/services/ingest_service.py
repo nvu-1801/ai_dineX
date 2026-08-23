@@ -111,12 +111,18 @@ async def auto_ingestion_worker():
 
     while True:
         try:
-            async with AsyncSessionLocal() as session:
-                count = await ingest_menu_embeddings(session)
-                if count > 0:
-                    logger.info("[Auto-Ingestion Worker] Successfully generated embeddings for %d new items.", count)
-                else:
-                    logger.info("[Auto-Ingestion Worker] Menu vector database is up-to-date (0 items pending).")
+            total_processed = 0
+            while True:
+                async with AsyncSessionLocal() as session:
+                    count = await ingest_menu_embeddings(session)
+                    total_processed += count
+                    if count < 1000:
+                        break
+
+            if total_processed > 0:
+                logger.info("[Auto-Ingestion Worker] Successfully generated embeddings for %d new items.", total_processed)
+            else:
+                logger.info("[Auto-Ingestion Worker] Menu vector database is up-to-date (0 items pending).")
         except Exception:
             logger.exception("[Auto-Ingestion Worker] Error during scheduled ingest")
 

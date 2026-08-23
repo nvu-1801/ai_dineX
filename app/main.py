@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
         await worker_task
     except asyncio.CancelledError:
         logger.info("Auto-ingestion background task cancelled cleanly.")
+        raise
 
 
 app = FastAPI(

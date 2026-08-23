@@ -26,6 +26,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
@@ -36,11 +37,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --only-binary :all: -r requirements.txt || pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest==8.2.0 pytest-cov==5.0.0
 
       - name: Run Tests with Coverage
         run: |
-          pytest --cov=app --cov-report=xml || true
+          pytest --cov=app --cov-report=xml
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@cb201f3b2d7a38231a8c042dfea4539c8bea180b # v3.1.0

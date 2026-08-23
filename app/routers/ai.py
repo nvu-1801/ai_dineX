@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
-from pydantic import BaseModel, Field, AliasChoices
+from pydantic import BaseModel, Field, AliasChoices, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -48,8 +48,14 @@ router = APIRouter(prefix="/api/ai", tags=["AI"], dependencies=[Depends(verify_a
 # ---------------------------------------------------------------------------
 
 class UserLocationSchema(BaseModel):
-    latitude: Optional[float] = Field(None, validation_alias=AliasChoices("latitude", "lat"))
-    longitude: Optional[float] = Field(None, validation_alias=AliasChoices("longitude", "lng"))
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0, validation_alias=AliasChoices("latitude", "lat"))
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0, validation_alias=AliasChoices("longitude", "lng"))
+
+    @model_validator(mode="after")
+    def validate_both_coordinates(self):
+        if (self.latitude is None and self.longitude is not None) or (self.latitude is not None and self.longitude is None):
+            raise ValueError("Both latitude and longitude must be provided together.")
+        return self
 
 
 class ChatRequest(BaseModel):

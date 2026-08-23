@@ -339,14 +339,13 @@ async def _dispatch_tool(
             enforced_branch_id = fallback_branch_id
             
         logger.info(
-            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s | User Pos: (%s, %s)",
+            "[search_menu_items Tool Interceptor] LLM query: '%s' -> Clean query: '%s' | LLM max_price: %s -> Final max_price: %s | BranchId: %s | Has Location: %s",
             raw_query,
             final_query,
             raw_max_price,
             final_max_price,
             enforced_branch_id,
-            user_lat,
-            user_lng
+            bool(user_lat is not None and user_lng is not None)
         )
         
         products = await search_products(
@@ -362,23 +361,7 @@ async def _dispatch_tool(
             max_radius_km=15.0,
         )
         
-        # Fallback 1: Cross-Branch Search if 0 items found in current branch
-        if not products and enforced_branch_id:
-            logger.info("[search_menu_items Tool] 0 items in branch %s. Executing Fallback cross-branch search within 15km.", enforced_branch_id)
-            products = await search_products(
-                db=db,
-                query=final_query,
-                category_id=category_id,
-                branch_id=None,
-                min_price=final_min_price,
-                max_price=final_max_price,
-                limit=5,
-                user_lat=user_lat,
-                user_lng=user_lng,
-                max_radius_km=15.0,
-            )
-
-        # Fallback 2: Smart Recommendation fallback when query has 0 matches or is a generic price query
+        # Fallback: Smart Recommendation fallback when query has 0 matches or is a generic price query
         if not products:
             fallback_items = await search_products(
                 db=db,
@@ -392,7 +375,7 @@ async def _dispatch_tool(
                 user_lng=user_lng,
                 max_radius_km=15.0,
             )
-            if not fallback_items and enforced_branch_id:
+            if not fallback_items and not enforced_branch_id:
                 fallback_items = await search_products(
                     db=db,
                     query="",
@@ -466,7 +449,7 @@ def detect_out_of_domain(message: str) -> tuple[bool, str]:
         "lẩu", "bánh mì", "trà", "cà phê", "cafe", "nước", "giá", "tiền", "đặt", "order",
         "toppings", "gọi món", "thanh toán", "hóa đơn", "bill", "chay", "khai vị", "tráng miệng"
     ]
-    if any(w in msg_lower for w in food_whitelist):
+    if any(re.search(rf'(?:\b|_){re.escape(w)}(?:\b|_)', msg_lower) for w in food_whitelist):
         return False, ""
         
     # 2. Blacklist patterns for Out-Of-Domain queries
@@ -510,27 +493,19 @@ async def handle_chat(
     user_lng: float | None = None,
 ) -> ChatResponse:
     """
-    Full RAG + Gemini chat pipeline.
-
-    Args:
-        db:           Async DB session (injected by FastAPI).
-        message:      Raw user message string.
-        branch_id:    Optional branch UUID for future branch-scoped filtering.
-        chat_history: Previous turns as list of {"role": str, "content": str}.
-        session_id:   Optional session ID to query last recommended branch.
-        chat_cart:    Virtual chat cart items.
-        user_lat:     User latitude for 15km proximity search.
-        user_lng:     User longitude for 15km proximity search.
-
-    Returns:
-        Strict ChatResponse (reply, order_draft, recommendations).
+    Core RAG Orchestrator:
+    0. Fast OOD Guardrail check (reject non-food prompts with 0 token cost)
+    1. Vector search in PostgreSQL (pgvector) to find relevant menu items (filtered by 15km radius)
+    2. Build prompt context (menu context + current cart)
+    3. Multi-turn conversation with Gemini with search_menu_items tool calling loop
+    4. Return typed ChatResponse
     """
     chat_history = chat_history or []
 
     # 0. Fast Guardrail: Early Out-Of-Domain (OOD) Rejection (< 1ms, 0 token cost)
     is_ood, ood_reason = detect_out_of_domain(message)
     if is_ood:
-        logger.info("[Fast Guardrail] Blocked OOD query (reason: %s): '%s'", ood_reason, message)
+        logger.info("[Fast Guardrail] Blocked OOD message (reason: %s): '%s'", ood_reason, message)
         reply = (
             "Dạ em là trợ lý ẩm thực của DineX, nên em chỉ có thể hỗ trợ bạn về thực đơn, món ăn và đồ uống thôi ạ! ☕🍲\n\n"
             "Nếu bạn đang cần nạp năng lượng hay thư giãn, bạn có muốn thử một ly **Cà Phê Muối** thơm béo hoặc một phần **Bánh Flan Caramel** mát lạnh không ạ?\n\n"
@@ -628,7 +603,7 @@ async def handle_chat(
         return ChatResponse(
             reply=reply,
             order_draft=order_draft,
-            recommendations=products
+            recommendations=[p.name for p in products]
         )
 
     # 0.5 Extract locked branch_id from chat_cart if branch_id was not explicitly passed
@@ -642,7 +617,7 @@ async def handle_chat(
     # 1. Semantic product search to build initial context (with NLP price defense)
     nlp_min, nlp_max, clean_msg_q = extract_price_info(message)
     search_query = extract_food_query(clean_msg_q if clean_msg_q else message)
-    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s | User Pos: (%s, %s)", search_query, nlp_min, nlp_max, user_lat, user_lng)
+    logger.info("[Chat Service] Cleaned search query: '%s' | MinPrice: %s, MaxPrice: %s | Has Location: %s", search_query, nlp_min, nlp_max, bool(user_lat is not None and user_lng is not None))
     products: list[ProductResponse] = await search_products(
         db,
         search_query,
